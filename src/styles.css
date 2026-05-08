@@ -39,6 +39,54 @@ button {
   cursor: pointer;
 }
 
+.auth-shell {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 24px;
+  background: #18201d;
+}
+
+.auth-panel {
+  display: grid;
+  gap: 14px;
+  width: min(420px, 100%);
+  padding: 24px;
+  background: #ffffff;
+  border: 1px solid #dfe7e3;
+  border-radius: 8px;
+  box-shadow: 0 24px 70px rgba(7, 14, 11, 0.24);
+}
+
+.auth-mark {
+  display: grid;
+  place-items: center;
+  width: 50px;
+  aspect-ratio: 1;
+  color: #ffffff;
+  background: #176b5b;
+  border-radius: 8px;
+  font-size: 24px;
+  font-weight: 850;
+}
+
+.auth-panel h1 {
+  margin: 0;
+  font-size: 28px;
+  letter-spacing: 0;
+}
+
+.auth-panel p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.auth-error {
+  color: var(--danger) !important;
+  font-weight: 750;
+}
+
 .app {
   display: grid;
   grid-template-columns: 224px minmax(0, 1fr);
@@ -120,6 +168,14 @@ main {
   margin: 8px 0 0;
   color: var(--muted);
   line-height: 1.55;
+}
+
+.topbar-actions {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .summary-bar {
@@ -587,6 +643,17 @@ main {
   font-weight: 750;
 }
 
+.account-card {
+  grid-column: 1 / -1;
+}
+
+.account-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  align-items: end;
+  gap: 12px;
+}
+
 .panel {
   min-width: 0;
   margin-bottom: 16px;
@@ -778,6 +845,129 @@ select:disabled {
   margin-bottom: 16px;
 }
 
+.tool-feedback {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 18px;
+  padding: 14px;
+  background: #f8fbfa;
+  border: 1px solid #dce7e3;
+  border-radius: 8px;
+}
+
+.tool-feedback-head,
+.tool-feedback-actions,
+.tool-feedback-title span,
+.tool-report-strip {
+  display: flex;
+  align-items: center;
+}
+
+.tool-feedback-head {
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.tool-feedback-title {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.tool-feedback-title span {
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.tool-feedback-title strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+}
+
+.tool-feedback-title small,
+.tool-feedback p {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.tool-feedback p {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.tool-feedback-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.tool-feedback-actions button,
+.tool-report-strip button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 10px;
+  color: var(--accent);
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-weight: 700;
+}
+
+.tool-result-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.tool-result-grid span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.tool-result-grid small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.tool-result-grid strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.tool-report-strip {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tool-feedback-log {
+  max-height: 180px;
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  color: #d7f0e4;
+  white-space: pre-wrap;
+  background: #101714;
+  border-radius: 8px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 .tools-layout {
   display: grid;
   grid-template-columns: minmax(300px, 0.86fr) minmax(420px, 1.14fr);
@@ -894,6 +1084,13 @@ select:disabled {
   min-height: 34px;
   padding: 0;
   color: var(--danger);
+}
+
+.icon-warning {
+  width: 34px;
+  min-height: 34px;
+  padding: 0;
+  color: var(--warn);
 }
 
 .primary-button:disabled,
@@ -1022,6 +1219,11 @@ td small {
 .status-updating {
   color: #245f8f;
   background: #e6f1fb;
+}
+
+.status-rebooting {
+  color: #6e4b9f;
+  background: #f0eafa;
 }
 
 .status-unreachable {
@@ -1274,10 +1476,24 @@ td small {
 
 .connection-controls {
   display: grid;
-  grid-template-columns: minmax(280px, 1fr) minmax(150px, 0.32fr) minmax(150px, 0.28fr) minmax(130px, 0.24fr) auto;
+  grid-template-columns: minmax(280px, 1fr) repeat(3, minmax(140px, 0.3fr));
   gap: 10px;
   margin-top: 12px;
   margin-bottom: 4px;
+}
+
+.connection-sort-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.32fr) minmax(120px, 0.18fr) auto minmax(260px, 1fr);
+  gap: 10px;
+  align-items: end;
+  margin: 8px 0 6px;
+}
+
+.connection-sort-hint {
+  align-self: center;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .empty-state {
@@ -1616,6 +1832,10 @@ td small {
     grid-template-columns: 1fr;
   }
 
+  .tool-result-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .port-hop-group {
     padding-left: 0;
     padding-top: 14px;
@@ -1632,12 +1852,24 @@ td small {
   }
 
   .connection-controls {
-    grid-template-columns: minmax(260px, 1fr) repeat(3, minmax(120px, 0.34fr)) auto;
+    grid-template-columns: minmax(260px, 1fr) repeat(3, minmax(120px, 0.34fr));
+  }
+
+  .connection-sort-row {
+    grid-template-columns: minmax(160px, 0.4fr) minmax(120px, 0.24fr) auto;
+  }
+
+  .connection-sort-hint {
+    grid-column: 1 / -1;
   }
 
   .task-item {
     grid-template-columns: 1fr;
     align-items: start;
+  }
+
+  .account-form {
+    grid-template-columns: 1fr 1fr;
   }
 }
 
@@ -1647,18 +1879,26 @@ td small {
   }
 
   .topbar,
+  .topbar-actions,
   .form-grid,
   .overview-hero,
   .overview-metrics,
   .about-hero,
   .release-targets,
+  .account-form,
   .task-controls,
   .connection-controls,
+  .connection-sort-row,
   .node-select-controls,
   .stats-title-row,
+  .tool-feedback-head,
   .ban-panel {
     display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .tool-feedback-actions {
+    justify-content: flex-start;
   }
 
   .span-2 {
@@ -1666,6 +1906,7 @@ td small {
   }
 
   .hy2-options,
+  .tool-result-grid,
   .tool-grid,
   .tool-toggles,
   .toggle-stack,

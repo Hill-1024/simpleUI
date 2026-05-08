@@ -46,13 +46,17 @@ const state = reactive({
 const loading = ref(true);
 const busy = ref(false);
 const toast = ref("");
+const auth = reactive({ checked: false, authenticated: false });
+const authBusy = ref(false);
+const loginForm = reactive({ password: "" });
+const passwordForm = reactive({ currentPassword: "", newPassword: "", confirmPassword: "" });
 let refreshTimer = null;
 const pageDefinitions = [
   { id: "overview", title: "舰队总览", description: "服务器、节点、连接来源与流量态势。" },
   { id: "servers", title: "服务器管理", description: "添加服务器、安装或升级持久化 Hook，并维护服务器名称、分组与连接信息。" },
   { id: "deploy", title: "节点部署", description: "在 Hook 已就绪的服务器上部署或重新部署 Hysteria2 / Trojan 节点。" },
   { id: "nodes", title: "节点管理", description: "查看节点状态、资源同步结果，并执行修改、重启、卸载或强制清理。" },
-  { id: "connections", title: "连接统计与封禁", description: "按远程 IP 查看流量与连接来源，并在弹窗中选择要应用封禁的节点。" },
+  { id: "connections", title: "连接统计与封禁", description: "按客户端 IP 查看连接到节点的流量，并在弹窗中选择要应用封禁的节点。" },
   { id: "tools", title: "服务器工具", description: "执行性能优化和 IPQuality 双栈检测等 Hook 侧任务。" },
   { id: "logs", title: "任务日志", description: "查看当前任务的 Hook 输出，以及需要排障时的原始执行日志。" },
   { id: "about", title: "关于 SimpleUI", description: "项目信息、发布信息与桌面端构建目标。" }
@@ -81,6 +85,8 @@ const banNodeGroupFilter = ref("all");
 const banNodesGrouped = ref(true);
 const jobLogs = ref([]);
 const activeJob = ref(null);
+const toolFeedback = ref(null);
+const toolFeedbackLogExpanded = ref(false);
 const ipQualityModal = ref(null);
 const taskPanelCollapsed = ref(false);
 const taskSearch = ref("");
@@ -92,6 +98,8 @@ const connectionSearch = ref("");
 const connectionNodeFilter = ref("all");
 const connectionProtocolFilter = ref("all");
 const connectionFamilyFilter = ref("all");
+const connectionSortKey = ref("total");
+const connectionSortDirection = ref("desc");
 const editingServerId = ref("");
 const editingNodeId = ref("");
 const editingNodeName = ref("");
@@ -179,6 +187,16 @@ const taskStatusOptions = [
   { value: "queued", label: "队列中" },
   { value: "success", label: "完成" },
   { value: "failed", label: "失败" }
+];
+const connectionSortOptions = [
+  { value: "total", label: "总流量" },
+  { value: "rx", label: "RX 流量" },
+  { value: "tx", label: "TX 流量" },
+  { value: "connections", label: "连接数" },
+  { value: "lastSeenAt", label: "刷新时间" },
+  { value: "clientIp", label: "客户端 IP" },
+  { value: "node", label: "节点名称" },
+  { value: "protocol", label: "协议" }
 ];
 
 const currentProvider = computed(() => state.providers.find((item) => item.id === deployProtocol.value));
@@ -358,7 +376,9 @@ const connectionProtocolOptions = computed(() => {
     }
   }
   for (const connection of state.connections || []) {
-    if (connection.protocol) protocols.add(connection.protocol);
+    for (const protocol of connection.protocols || [connection.protocol]) {
+      if (protocol) protocols.add(protocol);
+    }
   }
   return Array.from(protocols).sort();
 });
@@ -370,7 +390,7 @@ const filteredRemoteTraffic = computed(() => {
     if (connectionProtocolFilter.value !== "all" && !(item.protocols || []).includes(connectionProtocolFilter.value)) return false;
     if (!query) return true;
     const haystack = [
-      item.remoteIp,
+      trafficClientIp(item),
       nodeName(item.nodeId),
       ...(item.protocols || []),
       item.connections,
@@ -390,7 +410,7 @@ const filteredConnections = computed(() => {
   return (state.connections || []).filter((connection) => {
     if (connectionFamilyFilter.value !== "all" && String(connection.ipFamily || "") !== connectionFamilyFilter.value) return false;
     if (connectionNodeFilter.value !== "all" && connection.nodeId !== connectionNodeFilter.value) return false;
-    if (connectionProtocolFilter.value !== "all" && connection.protocol !== connectionProtocolFilter.value) return false;
+    if (connectionProtocolFilter.value !== "all" && !(connection.protocols || [connection.protocol]).includes(connectionProtocolFilter.value)) return false;
     if (!query) return true;
     const haystack = [
       connection.sourceIp,
@@ -398,6 +418,9 @@ const filteredConnections = computed(() => {
       connection.remote,
       connection.local,
       connection.protocol,
+      ...(connection.protocols || []),
+      fmtBytes(connection.total || ((connection.rx || 0) + (connection.tx || 0))),
+      connection.connections,
       connection.state
     ]
       .filter(Boolean)
@@ -406,11 +429,13 @@ const filteredConnections = computed(() => {
     return haystack.includes(query);
   });
 });
+const sortedRemoteTraffic = computed(() => sortConnectionItems(filteredRemoteTraffic.value, "traffic"));
+const sortedConnections = computed(() => sortConnectionItems(filteredConnections.value, "connection"));
 const remoteTrafficRows = computed(() =>
-  groupedRows(filteredRemoteTraffic.value, connectionStatsGrouped.value, "全部远程 IP", "traffic", (item) => nodeGroupById(item.nodeId))
+  groupedRows(sortedRemoteTraffic.value, connectionStatsGrouped.value, "全部客户端 IP", "traffic", (item) => nodeGroupById(item.nodeId))
 );
 const connectionRows = computed(() =>
-  groupedRows(filteredConnections.value, connectionStatsGrouped.value, "全部连接", "connection", (item) => nodeGroupById(item.nodeId))
+  groupedRows(sortedConnections.value, connectionStatsGrouped.value, "全部连接", "connection", (item) => nodeGroupById(item.nodeId))
 );
 
 function fmtBytes(value = 0) {
@@ -431,6 +456,44 @@ function fmtPercent(value) {
 
 function fmtRate(value = 0) {
   return `${fmtBytes(value)}/s`;
+}
+
+function trafficClientIp(item = {}) {
+  return item.clientIp || item.remoteIp || item.sourceIp || "";
+}
+
+function trafficTotal(item = {}) {
+  return Number(item.total ?? (Number(item.rx || 0) + Number(item.tx || 0)));
+}
+
+function connectionSortValue(item = {}, kind = "traffic", key = connectionSortKey.value) {
+  if (key === "clientIp") return kind === "traffic" ? trafficClientIp(item) : item.sourceIp;
+  if (key === "node") return nodeName(item.nodeId);
+  if (key === "protocol") return kind === "traffic" ? (item.protocols || []).join(", ") : (item.protocols || [item.protocol]).join(", ");
+  if (key === "lastSeenAt") return new Date(item.lastSeenAt || item.updatedAt || 0).getTime() || 0;
+  if (key === "rx") return Number(item.rx || 0);
+  if (key === "tx") return Number(item.tx || 0);
+  if (key === "connections") return kind === "traffic" ? Number(item.connections || 0) : Number(item.connections || 1);
+  return trafficTotal(item);
+}
+
+function compareSortValues(a, b) {
+  const aNumber = typeof a === "number" && Number.isFinite(a);
+  const bNumber = typeof b === "number" && Number.isFinite(b);
+  if (aNumber || bNumber) return Number(a || 0) - Number(b || 0);
+  return String(a || "").localeCompare(String(b || ""), "zh-Hans-CN", { numeric: true, sensitivity: "base" });
+}
+
+function sortConnectionItems(items = [], kind = "traffic") {
+  const direction = connectionSortDirection.value === "asc" ? 1 : -1;
+  const key = connectionSortKey.value;
+  return [...(items || [])].sort((a, b) => {
+    const primary = compareSortValues(connectionSortValue(a, kind, key), connectionSortValue(b, kind, key));
+    if (primary) return primary * direction;
+    const clientCompare = compareSortValues(kind === "traffic" ? trafficClientIp(a) : a.sourceIp, kind === "traffic" ? trafficClientIp(b) : b.sourceIp);
+    if (clientCompare) return clientCompare;
+    return compareSortValues(nodeName(a.nodeId), nodeName(b.nodeId));
+  });
 }
 
 function averageMetric(items, getter) {
@@ -463,6 +526,7 @@ function statusLabel(status) {
   if (status === "installing") return "安装中";
   if (status === "deleting") return "删除中";
   if (status === "updating") return "更新中";
+  if (status === "rebooting") return "重启中";
   if (status === "unreachable") return "不可达";
   if (status === "cleanup-failed") return "清理失败";
   if (status === "warning") return "注意";
@@ -488,13 +552,14 @@ function jobSummary(job) {
       : `内核 ${result.kernel || "-"}，${result.congestionControl || "-"} / ${result.queueDiscipline || "-"}`;
   }
   if (job.type === "status" && result && typeof result === "object") {
-    return `连接 ${result.connections?.length || 0}，远程 IP ${result.remoteTraffic?.length || 0}`;
+    return `客户端 ${result.connections?.length || 0}，客户端 IP ${result.remoteTraffic?.length || 0}`;
   }
   if (job.type === "deploy") return result?.endpoint ? `节点部署完成：${result.endpoint}` : "节点部署完成";
   if (job.type === "node-update") return result?.endpoint ? `节点更新完成：${result.endpoint}` : "节点更新完成";
   if (job.type === "ban") return "封禁规则已下发";
   if (job.type === "node-delete") return "节点清理完成";
   if (job.type === "server-delete") return "服务器清理完成";
+  if (job.type === "server-reboot") return job.result?.delaySeconds ? `服务器将在 ${job.result.delaySeconds} 秒后重启` : "服务器重启已下发";
   if (job.type === "hook-install") return result?.hookUrl ? `Hook 已就绪：${result.hookUrl}` : "Hook 安装完成";
   return result ? "已返回结构化结果" : "完成";
 }
@@ -509,6 +574,7 @@ function jobKindLabel(type) {
     ban: "封禁",
     "node-delete": "卸载节点",
     "server-delete": "删除服务器",
+    "server-reboot": "服务器重启",
     optimize: "优化",
     ipquality: "IPQuality"
   };
@@ -525,6 +591,43 @@ function canOpenJobResult(job) {
 
 function openJobResult(job) {
   if (canOpenJobResult(job)) ipQualityModal.value = job.result;
+}
+
+function toolFeedbackReports(job = toolFeedback.value) {
+  if (!job) return [];
+  if (Array.isArray(job.reports) && job.reports.length) return job.reports;
+  if (Array.isArray(job.result?.reports) && job.result.reports.length) return job.result.reports;
+  if (job.result?.reportUrl || job.result?.rawOutput) return [job.result];
+  return [];
+}
+
+function canOpenToolFeedbackResult(job = toolFeedback.value) {
+  return toolFeedbackReports(job).some((report) => report.reportUrl || report.rawOutput);
+}
+
+function openToolFeedbackResult(job = toolFeedback.value) {
+  const reports = toolFeedbackReports(job);
+  if (!reports.length) return;
+  ipQualityModal.value = reports.length > 1 ? { reports } : reports[0];
+}
+
+function openToolReport(report) {
+  if (report?.reportUrl || report?.rawOutput) ipQualityModal.value = report;
+}
+
+function toolFeedbackSummary(job = toolFeedback.value) {
+  if (!job) return "";
+  if (job.status === "running") return "任务正在远端 hook 中执行，完成后这里会更新结果。";
+  if (job.status === "queued") return "任务已加入队列，等待 hook 执行。";
+  if (job.status === "failed") return job.error || "执行失败，请展开输出查看原因。";
+  const reports = toolFeedbackReports(job);
+  if (reports.length) return `IPQuality 已返回 ${reports.length} 份检测结果，可直接打开报告。`;
+  return jobSummary(job);
+}
+
+function toolFeedbackLogText(job = toolFeedback.value) {
+  const text = (job?.logs || []).join("");
+  return text.trim() ? text : "等待 Hook 输出...";
 }
 
 function serverName(serverId) {
@@ -612,8 +715,123 @@ function parseUsers(text, protocol = deployProtocol.value) {
     .filter((user) => user.username && user.password);
 }
 
+function stopRefresh() {
+  if (refreshTimer) {
+    window.clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
+}
+
+function startRefresh() {
+  stopRefresh();
+  refreshTimer = window.setInterval(() => {
+    load().catch(showError);
+  }, 5000);
+}
+
+function clearRuntimeState() {
+  Object.assign(state, {
+    servers: [],
+    nodes: [],
+    users: [],
+    connections: [],
+    remoteTraffic: [],
+    bans: [],
+    jobs: [],
+    audit: [],
+    providers: []
+  });
+  selectedNodes.value = [];
+  activeJob.value = null;
+  jobLogs.value = [];
+  toolFeedback.value = null;
+  ipQualityModal.value = null;
+}
+
+function handleAuthError(error) {
+  if (error?.status !== 401) return false;
+  auth.authenticated = false;
+  auth.checked = true;
+  loading.value = false;
+  busy.value = false;
+  stopRefresh();
+  clearRuntimeState();
+  toast.value = "登录已过期，请重新登录。";
+  return true;
+}
+
+async function checkSession() {
+  try {
+    const session = await api.session();
+    auth.authenticated = Boolean(session.authenticated);
+  } catch {
+    auth.authenticated = false;
+  } finally {
+    auth.checked = true;
+    if (!auth.authenticated) loading.value = false;
+  }
+}
+
+async function login() {
+  authBusy.value = true;
+  toast.value = "";
+  try {
+    await api.login(loginForm.password);
+    loginForm.password = "";
+    auth.authenticated = true;
+    loading.value = true;
+    await load();
+    startRefresh();
+  } catch (error) {
+    toast.value = error?.status === 401 ? "密码不正确。" : (error?.message || "登录失败");
+  } finally {
+    authBusy.value = false;
+  }
+}
+
+async function logout() {
+  authBusy.value = true;
+  try {
+    await api.logout();
+  } catch {
+    // The local session should still be discarded even if the request is interrupted.
+  } finally {
+    auth.authenticated = false;
+    loading.value = false;
+    stopRefresh();
+    clearRuntimeState();
+    authBusy.value = false;
+  }
+}
+
+async function changeWebPassword() {
+  if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+    toast.value = "两次输入的新密码不一致。";
+    return;
+  }
+  authBusy.value = true;
+  try {
+    await api.changePassword({
+      currentPassword: passwordForm.currentPassword,
+      newPassword: passwordForm.newPassword
+    });
+    Object.assign(passwordForm, { currentPassword: "", newPassword: "", confirmPassword: "" });
+    toast.value = "WebUI 登录密码已更新。";
+  } catch (error) {
+    showError(error);
+  } finally {
+    authBusy.value = false;
+  }
+}
+
 async function load() {
-  const data = await api.bootstrap();
+  let data;
+  try {
+    data = await api.bootstrap();
+  } catch (error) {
+    if (handleAuthError(error)) return;
+    throw error;
+  }
   Object.assign(state, data);
   const currentNodeIds = new Set((data.nodes || []).map((node) => node.id));
   selectedNodes.value = selectedNodes.value.filter((id) => currentNodeIds.has(id));
@@ -631,23 +849,66 @@ async function syncNow() {
   try {
     await api.sync();
   } catch (error) {
-    showError(error);
+    if (!handleAuthError(error)) showError(error);
   }
   await load().catch(showError);
 }
 
 function showError(error) {
+  if (handleAuthError(error)) return;
   toast.value = error?.message || String(error);
 }
 
-function watchJob(job) {
+function startToolFeedback(job, title = job?.title) {
+  toolFeedback.value = {
+    ...(job || {}),
+    title: title || job?.title || "工具任务",
+    status: job?.status || "queued",
+    createdAt: job?.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    logs: [],
+    reports: []
+  };
+  toolFeedbackLogExpanded.value = false;
+}
+
+function appendToolFeedbackLog(line) {
+  if (!toolFeedback.value) return;
+  const logs = [...(toolFeedback.value.logs || []), line].slice(-500);
+  const status = toolFeedback.value.status === "queued" ? "running" : toolFeedback.value.status;
+  toolFeedback.value = { ...toolFeedback.value, status, logs, updatedAt: new Date().toISOString() };
+}
+
+function updateToolFeedback(patch = {}) {
+  if (!toolFeedback.value) return;
+  const reports = patch.reports || toolFeedback.value.reports || [];
+  toolFeedback.value = {
+    ...toolFeedback.value,
+    ...patch,
+    reports,
+    updatedAt: new Date().toISOString()
+  };
+  if (patch.status === "failed") toolFeedbackLogExpanded.value = true;
+}
+
+function clearToolFeedback() {
+  toolFeedback.value = null;
+  toolFeedbackLogExpanded.value = false;
+}
+
+function watchJob(job, options = {}) {
   activeJob.value = job;
   jobLogs.value = [];
+  if (options.feedbackScope === "tools") startToolFeedback(job, options.title);
   subscribeJob(job.id, {
-    onLog: (line) => jobLogs.value.push(line),
+    onLog: (line) => {
+      jobLogs.value.push(line);
+      if (options.feedbackScope === "tools") appendToolFeedbackLog(line);
+    },
     onDone: (done) => {
       const completedJob = { ...activeJob.value, ...done };
       activeJob.value = completedJob;
+      if (options.feedbackScope === "tools") updateToolFeedback(done);
       if (completedJob.type === "ipquality" && done?.result) {
         ipQualityModal.value = done.result;
       }
@@ -655,35 +916,47 @@ function watchJob(job) {
       load().catch(showError);
     },
     onError: () => {
+      if (options.feedbackScope === "tools") {
+        updateToolFeedback({ status: "failed", error: "任务订阅中断，请查看任务日志确认最终状态。" });
+      }
       busy.value = false;
     }
   });
 }
 
-function watchJobs(jobs, title) {
+function watchJobs(jobs, title, options = {}) {
   const pending = new Set(jobs.map((job) => job.id));
   const ipQualityResults = [];
   let failed = 0;
   activeJob.value = { id: "batch", title, type: "batch", status: "running", createdAt: new Date().toISOString() };
   jobLogs.value = [];
+  if (options.feedbackScope === "tools") startToolFeedback(activeJob.value, title);
   for (const job of jobs) {
     jobLogs.value.push(`--- ${job.title} ---\n`);
+    if (options.feedbackScope === "tools") appendToolFeedbackLog(`--- ${job.title} ---\n`);
     subscribeJob(job.id, {
-      onLog: (line) => jobLogs.value.push(line),
+      onLog: (line) => {
+        jobLogs.value.push(line);
+        if (options.feedbackScope === "tools") appendToolFeedbackLog(line);
+      },
       onDone: (done) => {
         if (done?.status === "failed") failed += 1;
         if (job.type === "ipquality" && done?.result) {
           ipQualityResults.push({ ...done.result, title: job.title });
+          if (options.feedbackScope === "tools") updateToolFeedback({ reports: ipQualityResults });
         }
         pending.delete(job.id);
         if (!pending.size) {
           busy.value = false;
-          activeJob.value = {
+          const completedBatch = {
             ...activeJob.value,
             status: failed ? "failed" : "success",
             updatedAt: new Date().toISOString(),
-            error: failed ? `${failed} 个子任务失败` : ""
+            error: failed ? `${failed} 个子任务失败` : "",
+            result: ipQualityResults.length ? { reports: ipQualityResults } : undefined
           };
+          activeJob.value = completedBatch;
+          if (options.feedbackScope === "tools") updateToolFeedback(completedBatch);
           if (ipQualityResults.length) {
             ipQualityModal.value = { reports: ipQualityResults };
           }
@@ -691,8 +964,12 @@ function watchJobs(jobs, title) {
         }
       },
       onError: () => {
+        failed += 1;
         pending.delete(job.id);
-        if (!pending.size) busy.value = false;
+        if (!pending.size) {
+          busy.value = false;
+          if (options.feedbackScope === "tools") updateToolFeedback({ status: "failed", error: `${failed} 个子任务失败或订阅中断` });
+        }
       }
     });
   }
@@ -821,6 +1098,18 @@ async function forceClearServer(server) {
     showError(error);
   } finally {
     busy.value = false;
+  }
+}
+
+async function rebootServer(server) {
+  if (!window.confirm(`重启服务器 ${server.name}？目标服务器会在任务返回后短暂下线，期间 hook 和节点都可能不可用。继续吗？`)) return;
+  busy.value = true;
+  try {
+    const result = await api.rebootServer(server.id);
+    watchJob(result.job);
+  } catch (error) {
+    busy.value = false;
+    showError(error);
   }
 }
 
@@ -1001,7 +1290,7 @@ async function runBan() {
       targetIp: sourceIp.value,
       nodeIds: selectedNodes.value
     });
-    watchJobs(result.jobs, `批量封禁来源 IP ${sourceIp.value}`);
+    watchJobs(result.jobs, `批量封禁客户端 IP ${sourceIp.value}`);
   } catch (error) {
     busy.value = false;
     showError(error);
@@ -1015,7 +1304,7 @@ async function runOptimize() {
       serverId: toolServerId.value,
       action: optimizeAction.value
     });
-    watchJob(result.job);
+    watchJob(result.job, { feedbackScope: "tools" });
   } catch (error) {
     busy.value = false;
     showError(error);
@@ -1030,9 +1319,9 @@ async function runIpQuality() {
       ...ipQualityForm
     });
     if (result.jobs?.length) {
-      watchJobs(result.jobs, `IPQuality ${serverName(toolServerId.value)} IPv4 + IPv6`);
+      watchJobs(result.jobs, `IPQuality ${serverName(toolServerId.value)} IPv4 + IPv6`, { feedbackScope: "tools" });
     } else {
-      watchJob(result.job);
+      watchJob(result.job, { feedbackScope: "tools" });
     }
   } catch (error) {
     busy.value = false;
@@ -1050,23 +1339,52 @@ watch(
 onMounted(() => {
   syncPageFromHash();
   window.addEventListener("hashchange", syncPageFromHash);
-  load().catch((error) => {
-    loading.value = false;
-    showError(error);
-  });
-  refreshTimer = window.setInterval(() => {
-    load().catch(showError);
-  }, 5000);
+  checkSession()
+    .then(async () => {
+      if (!auth.authenticated) return;
+      await load();
+      startRefresh();
+    })
+    .catch((error) => {
+      loading.value = false;
+      showError(error);
+    });
 });
 
 onUnmounted(() => {
   window.removeEventListener("hashchange", syncPageFromHash);
-  if (refreshTimer) window.clearInterval(refreshTimer);
+  stopRefresh();
 });
 </script>
 
 <template>
-  <div class="app">
+  <div v-if="!auth.checked" class="auth-shell">
+    <section class="auth-panel">
+      <div class="auth-mark">S</div>
+      <h1>SimpleUI</h1>
+      <p>正在检查登录状态...</p>
+    </section>
+  </div>
+
+  <div v-else-if="!auth.authenticated" class="auth-shell">
+    <form class="auth-panel" @submit.prevent="login">
+      <div class="auth-mark">S</div>
+      <h1>SimpleUI</h1>
+      <p>输入首次启动时在 CLI 输出的 UUID 初始密码。</p>
+      <p v-if="toast" class="auth-error">{{ toast }}</p>
+      <label>
+        <span>WebUI 密码</span>
+        <input v-model="loginForm.password" type="password" autocomplete="current-password" autofocus required />
+      </label>
+      <button class="primary-button" type="submit" :disabled="authBusy || !loginForm.password">
+        <Loader2 v-if="authBusy" class="spin" :size="16" />
+        <ShieldCheck v-else :size="16" />
+        登录
+      </button>
+    </form>
+  </div>
+
+  <div v-else class="app">
     <aside class="sidebar">
       <div class="brand">
         <strong>SimpleUI</strong>
@@ -1090,11 +1408,17 @@ onUnmounted(() => {
           <h1>{{ pageMeta.title }}</h1>
           <p>{{ pageMeta.description }}</p>
         </div>
-        <button type="button" @click="syncNow" :disabled="loading">
-          <Loader2 v-if="loading" class="spin" :size="16" />
-          <RefreshCcw v-else :size="16" />
-          同步
-        </button>
+        <div class="topbar-actions">
+          <button type="button" @click="syncNow" :disabled="loading">
+            <Loader2 v-if="loading" class="spin" :size="16" />
+            <RefreshCcw v-else :size="16" />
+            同步
+          </button>
+          <button type="button" @click="logout" :disabled="authBusy">
+            <X :size="16" />
+            退出
+          </button>
+        </div>
       </header>
 
       <div v-if="toast" class="toast" @click="toast = ''">
@@ -1240,7 +1564,7 @@ onUnmounted(() => {
             <Network :size="18" />
             <span>连接来源</span>
             <strong>{{ state.connections.length }}</strong>
-            <small>{{ state.remoteTraffic.length }} 个远程 IP</small>
+            <small>{{ state.remoteTraffic.length }} 个客户端 IP</small>
           </article>
           <article>
             <Gauge :size="18" />
@@ -1297,13 +1621,13 @@ onUnmounted(() => {
 
           <section class="overview-panel remote-panel">
             <div class="overview-panel-head">
-              <div><Network :size="17" /><h3>远程 IP</h3></div>
+              <div><Network :size="17" /><h3>客户端 IP</h3></div>
               <small>{{ state.remoteTraffic.length }} 个来源</small>
             </div>
-            <div v-if="!topRemoteTraffic.length" class="empty-state">还没有远程 IP 流量统计。</div>
+            <div v-if="!topRemoteTraffic.length" class="empty-state">还没有客户端流量统计。</div>
             <div v-else class="remote-list">
               <article v-for="item in topRemoteTraffic" :key="item.id">
-                <strong>{{ item.remoteIp }}</strong>
+                <strong>{{ trafficClientIp(item) }}</strong>
                 <small>IPv{{ item.ipFamily || "-" }} · {{ nodeName(item.nodeId) }}</small>
                 <span>{{ fmtBytes(item.total || ((item.rx || 0) + (item.tx || 0))) }}</span>
               </article>
@@ -1418,6 +1742,30 @@ onUnmounted(() => {
             </div>
             <p class="form-note">Release 包命名：SimpleUI_版本_系统平台_硬件架构.扩展名。</p>
           </section>
+          <section class="panel about-card account-card">
+            <div class="section-title">
+              <div><ShieldCheck :size="18" /><h2>访问安全</h2></div>
+            </div>
+            <form class="account-form" @submit.prevent="changeWebPassword">
+              <label>
+                <span>当前密码</span>
+                <input v-model="passwordForm.currentPassword" type="password" autocomplete="current-password" required />
+              </label>
+              <label>
+                <span>新密码</span>
+                <input v-model="passwordForm.newPassword" type="password" minlength="8" autocomplete="new-password" required />
+              </label>
+              <label>
+                <span>确认新密码</span>
+                <input v-model="passwordForm.confirmPassword" type="password" minlength="8" autocomplete="new-password" required />
+              </label>
+              <button class="primary-button" type="submit" :disabled="authBusy || !passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword">
+                <Loader2 v-if="authBusy" class="spin" :size="16" />
+                <Save v-else :size="16" />
+                修改登录密码
+              </button>
+            </form>
+          </section>
         </div>
       </section>
 
@@ -1510,6 +1858,7 @@ onUnmounted(() => {
                       <template v-else>
                         <button type="button" title="升级/重装 hook" :disabled="busy" @click="prepareHookUpgrade(row.server)"><ShieldCheck :size="15" /></button>
                         <button type="button" title="编辑服务器信息" :disabled="busy" @click="startEditServer(row.server)"><Pencil :size="15" /></button>
+                        <button class="icon-warning" type="button" title="重启服务器" :disabled="busy || row.server.hookStatus !== 'online'" @click="rebootServer(row.server)"><RotateCw :size="15" /></button>
                         <button class="icon-danger" type="button" title="卸载 hook 并删除服务器" :disabled="busy || row.server.hookStatus === 'deleting'" @click="deleteServer(row.server)">
                           <Trash2 :size="15" />
                         </button>
@@ -1681,6 +2030,43 @@ onUnmounted(() => {
             </select>
           </label>
         </div>
+        <div v-if="toolFeedback" class="tool-feedback">
+          <div class="tool-feedback-head">
+            <div class="tool-feedback-title">
+              <span>
+                <Loader2 v-if="['queued', 'running'].includes(toolFeedback.status)" class="spin" :size="15" />
+                <CircleAlert v-else-if="toolFeedback.status === 'failed'" :size="15" />
+                <PackageCheck v-else :size="15" />
+                工具反馈
+              </span>
+              <strong>{{ toolFeedback.title }}</strong>
+              <small>{{ jobTime(toolFeedback) }}</small>
+            </div>
+            <div class="tool-feedback-actions">
+              <span :class="`pill status-${toolFeedback.status || 'unknown'}`">{{ statusLabel(toolFeedback.status) }}</span>
+              <button v-if="canOpenToolFeedbackResult(toolFeedback)" type="button" @click="openToolFeedbackResult(toolFeedback)">
+                <ExternalLink :size="15" />查看报告
+              </button>
+              <button type="button" @click="toolFeedbackLogExpanded = !toolFeedbackLogExpanded">
+                <Terminal :size="15" />{{ toolFeedbackLogExpanded ? "收起输出" : "展开输出" }}
+              </button>
+              <button type="button" title="清除反馈" @click="clearToolFeedback"><X :size="15" /></button>
+            </div>
+          </div>
+          <p>{{ toolFeedbackSummary(toolFeedback) }}</p>
+          <div v-if="toolFeedback.type === 'optimize' && toolFeedback.result && typeof toolFeedback.result === 'object'" class="tool-result-grid">
+            <span><small>内核</small><strong>{{ toolFeedback.result.kernel || "-" }}</strong></span>
+            <span><small>拥塞控制</small><strong>{{ toolFeedback.result.congestionControl || "-" }}</strong></span>
+            <span><small>队列</small><strong>{{ toolFeedback.result.queueDiscipline || "-" }}</strong></span>
+            <span><small>ECN</small><strong>{{ toolFeedback.result.ecn ?? "-" }}</strong></span>
+          </div>
+          <div v-if="toolFeedbackReports(toolFeedback).length" class="tool-report-strip">
+            <button v-for="report in toolFeedbackReports(toolFeedback)" :key="report.title || report.mode || report.reportUrl || report.reportPath" type="button" @click="openToolReport(report)">
+              <SearchCheck :size="15" />{{ report.title || report.mode || "IPQuality 报告" }}
+            </button>
+          </div>
+          <pre v-if="toolFeedbackLogExpanded" class="tool-feedback-log">{{ toolFeedbackLogText(toolFeedback) }}</pre>
+        </div>
         <div class="tools-layout">
           <form class="tool-block" @submit.prevent="runOptimize">
             <div class="tool-heading"><Gauge :size="17" /><h3>HY2 同源性能优化</h3></div>
@@ -1800,10 +2186,10 @@ onUnmounted(() => {
 
       <section v-if="activePage === 'connections'" id="connections" class="panel">
         <div class="section-title">
-          <div><Ban :size="18" /><h2>远程 IP 流量与封禁</h2></div>
+          <div><Ban :size="18" /><h2>客户端流量与封禁</h2></div>
         </div>
         <div class="ban-panel">
-          <input v-model="sourceIp" placeholder="连接来源 IP/CIDR，如 203.0.113.10 或 2001:db8::/64" />
+          <input v-model="sourceIp" placeholder="客户端 IP/CIDR，如 203.0.113.10 或 2001:db8::/64" />
           <button type="button" class="secondary-button" @click="banNodeModalOpen = true">
             <Wifi :size="16" />选择节点（{{ selectedNodes.length }}）
           </button>
@@ -1816,7 +2202,7 @@ onUnmounted(() => {
         <div class="stats-title-row">
           <div>
             <h3 class="subsection-title">连接统计列表</h3>
-            <span class="filter-count">远程 IP {{ filteredRemoteTraffic.length }} / {{ state.remoteTraffic.length }}，实时连接 {{ filteredConnections.length }} / {{ state.connections.length }}</span>
+            <span class="filter-count">客户端 IP {{ filteredRemoteTraffic.length }} / {{ state.remoteTraffic.length }}，实时连接 {{ filteredConnections.length }} / {{ state.connections.length }}</span>
           </div>
           <button class="collapse-button" type="button" :aria-expanded="!connectionStatsCollapsed" @click="connectionStatsCollapsed = !connectionStatsCollapsed">
             <ChevronRight v-if="connectionStatsCollapsed" :size="16" />
@@ -1834,7 +2220,7 @@ onUnmounted(() => {
               <span>搜索</span>
               <div class="input-with-icon">
                 <Search :size="15" />
-                <input v-model="connectionSearch" placeholder="IP、节点、协议、远端地址" />
+                <input v-model="connectionSearch" placeholder="客户端 IP、节点、协议、本地地址" />
               </div>
             </label>
             <label>
@@ -1859,29 +2245,45 @@ onUnmounted(() => {
                 <option value="6">IPv6</option>
               </select>
             </label>
+          </div>
+          <div class="connection-sort-row">
+            <label>
+              <span>排序参考</span>
+              <select v-model="connectionSortKey">
+                <option v-for="option in connectionSortOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+              </select>
+            </label>
+            <label>
+              <span>顺序</span>
+              <select v-model="connectionSortDirection">
+                <option value="desc">降序</option>
+                <option value="asc">升序</option>
+              </select>
+            </label>
             <label class="toggle-row compact-toggle">
               <input v-model="connectionStatsGrouped" type="checkbox" />
               <span>按节点分组展示</span>
             </label>
+            <span class="connection-sort-hint">统计口径：仅统计连接到节点监听端口的客户端入站与回程流量。</span>
           </div>
 
-          <h3 class="subsection-title">远程 IP 流量统计</h3>
-          <div v-if="!state.remoteTraffic.length" class="empty-state">刷新节点状态后，这里会按远程 IP 统计 RX/TX 流量。</div>
-          <div v-else-if="!filteredRemoteTraffic.length" class="empty-state">没有符合当前筛选条件的远程 IP 流量记录。</div>
+          <h3 class="subsection-title">客户端流量统计</h3>
+          <div v-if="!state.remoteTraffic.length" class="empty-state">刷新节点状态后，这里会按客户端 IP 统计 RX/TX 流量。</div>
+          <div v-else-if="!filteredRemoteTraffic.length" class="empty-state">没有符合当前筛选条件的客户端流量记录。</div>
           <div v-else class="table-wrap compact-table stats-table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>远程 IP</th><th>节点</th><th>RX</th><th>TX</th><th>总计</th><th>连接</th><th>协议</th><th>刷新时间</th><th>操作</th>
+                  <th>客户端 IP</th><th>节点</th><th>RX</th><th>TX</th><th>总计</th><th>连接</th><th>协议</th><th>刷新时间</th><th>操作</th>
                 </tr>
               </thead>
               <tbody>
                 <template v-for="row in remoteTrafficRows" :key="row.key">
                   <tr v-if="row.type === 'group'" class="group-row">
-                    <td colspan="9"><strong>{{ row.label }}</strong><span>{{ row.count }} 条远程 IP</span></td>
+                    <td colspan="9"><strong>{{ row.label }}</strong><span>{{ row.count }} 条客户端 IP</span></td>
                   </tr>
                   <tr v-else>
-                    <td><strong>{{ row.traffic.remoteIp }}</strong><small v-if="row.traffic.ipFamily">IPv{{ row.traffic.ipFamily }}</small></td>
+                    <td><strong>{{ trafficClientIp(row.traffic) }}</strong><small v-if="row.traffic.ipFamily">IPv{{ row.traffic.ipFamily }}</small></td>
                     <td>{{ nodeName(row.traffic.nodeId) }}</td>
                     <td>{{ fmtBytes(row.traffic.rx) }}</td>
                     <td>{{ fmtBytes(row.traffic.tx) }}</td>
@@ -1889,33 +2291,35 @@ onUnmounted(() => {
                     <td>{{ row.traffic.connections || 0 }}</td>
                     <td>{{ (row.traffic.protocols || []).join(", ") || "-" }}</td>
                     <td>{{ fmtTime(row.traffic.lastSeenAt) }}</td>
-                    <td><button type="button" @click="sourceIp = row.traffic.remoteIp">填入封禁</button></td>
+                    <td><button type="button" @click="sourceIp = trafficClientIp(row.traffic)">填入封禁</button></td>
                   </tr>
                 </template>
               </tbody>
             </table>
           </div>
-          <h3 class="subsection-title">实时连接来源</h3>
-          <div v-if="!state.connections.length" class="empty-state">刷新节点状态后，这里会显示可封禁的连接来源 IP。</div>
+          <h3 class="subsection-title">实时客户端连接</h3>
+          <div v-if="!state.connections.length" class="empty-state">刷新节点状态后，这里会显示可封禁的客户端来源 IP。</div>
           <div v-else-if="!filteredConnections.length" class="empty-state">没有符合当前筛选条件的实时连接。</div>
           <div v-else class="table-wrap compact-table stats-table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>来源 IP</th><th>节点</th><th>远端</th><th>本地</th><th>协议</th><th>操作</th>
+                  <th>客户端 IP</th><th>节点</th><th>客户端端点</th><th>节点监听</th><th>协议</th><th>流量</th><th>连接</th><th>操作</th>
                 </tr>
               </thead>
               <tbody>
                 <template v-for="row in connectionRows" :key="row.key">
                   <tr v-if="row.type === 'group'" class="group-row">
-                    <td colspan="6"><strong>{{ row.label }}</strong><span>{{ row.count }} 条连接</span></td>
+                    <td colspan="8"><strong>{{ row.label }}</strong><span>{{ row.count }} 个客户端</span></td>
                   </tr>
                   <tr v-else>
                     <td><strong>{{ row.connection.sourceIp }}</strong><small v-if="row.connection.ipFamily">IPv{{ row.connection.ipFamily }}</small></td>
                     <td>{{ nodeName(row.connection.nodeId) }}</td>
-                    <td>{{ row.connection.remote }}</td>
-                    <td>{{ row.connection.local }}</td>
-                    <td>{{ row.connection.protocol }}</td>
+                    <td>{{ row.connection.remote || "-" }}</td>
+                    <td>{{ row.connection.local || "-" }}</td>
+                    <td>{{ (row.connection.protocols || [row.connection.protocol]).filter(Boolean).join(", ") || "-" }}</td>
+                    <td>{{ fmtBytes(row.connection.total || ((row.connection.rx || 0) + (row.connection.tx || 0))) }}</td>
+                    <td>{{ row.connection.connections || 1 }}</td>
                     <td><button type="button" @click="sourceIp = row.connection.sourceIp">填入</button></td>
                   </tr>
                 </template>

@@ -25,7 +25,7 @@
     "desktop:dist:win": "pnpm build && electron-builder --win nsis zip --publish never",
     "desktop:dist:mac": "pnpm build && electron-builder --mac dmg zip --publish never",
     "desktop:dist:linux": "pnpm build && electron-builder --linux deb zip --publish never",
-    "check": "node --check server/index.js && node --check server/lib/db.js && node --check server/lib/hook-agent.js && node --check server/lib/jobs.js && node --check server/lib/providers.js && node --check server/lib/ssh.js && node --check desktop/main.cjs"
+    "check": "node --check server/index.js && node --check server/lib/auth.js && node --check server/lib/db.js && node --check server/lib/hook-agent.js && node --check server/lib/jobs.js && node --check server/lib/providers.js && node --check server/lib/ssh.js && node --check desktop/main.cjs"
   },
   "dependencies": {
     "cors": "^2.8.5",

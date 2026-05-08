@@ -184,6 +184,7 @@ def add_remote_traffic(bucket, remote_ip, proto, rx, tx):
         return
     item = bucket.setdefault(remote_ip, {
         "remoteIp": remote_ip,
+        "clientIp": remote_ip,
         "ipFamily": ip_family(remote_ip),
         "rx": 0,
         "tx": 0,
@@ -202,6 +203,7 @@ def add_counter_traffic(bucket, remote_ip, direction, byte_count, proto):
         return
     item = bucket.setdefault(remote_ip, {
         "remoteIp": remote_ip,
+        "clientIp": remote_ip,
         "ipFamily": ip_family(remote_ip),
         "rx": 0,
         "tx": 0,
@@ -240,7 +242,7 @@ local_ips = {normalize_ip(item) for item in local_ips_raw.split(",") if normaliz
 def conntrack_remote_traffic(raw, service_port):
     bucket = {}
     service_port = str(service_port or "")
-    if not service_port:
+    if not service_port or not local_ips:
         return bucket
     for line in raw.splitlines():
         parts = line.split()
@@ -250,8 +252,9 @@ def conntrack_remote_traffic(raw, service_port):
             continue
         first = groups[0]
         second = groups[1] if len(groups) > 1 else {}
+        first_src = normalize_ip(first.get("src", ""))
         first_dst = normalize_ip(first.get("dst", ""))
-        if first.get("dport") == service_port and (not local_ips or first_dst in local_ips):
+        if first.get("dport") == service_port and first_dst in local_ips and first_src not in local_ips:
             add_remote_traffic(bucket, first.get("src", ""), proto, first.get("bytes"), second.get("bytes", 0))
     return bucket
 
@@ -265,12 +268,14 @@ for raw in socket_raw.splitlines():
     state = parts[1] if proto.startswith("tcp") else "UDP"
     local = parts[4]
     remote = parts[5] if len(parts) > 5 else ""
-    _, local_port = split_endpoint(local)
-    _, remote_port = split_endpoint(remote)
-    if port and local_port != str(port) and remote_port != str(port):
+    local_host, local_port = split_endpoint(local)
+    local_ip = normalize_ip(local_host)
+    if port and local_port != str(port):
+        continue
+    if local_ip and local_ips and local_ip not in local_ips:
         continue
     source_ip = clean_source_ip(remote)
-    if not source_ip:
+    if not source_ip or source_ip in local_ips:
         continue
     key = (proto, source_ip, remote, local)
     if key in seen:
@@ -282,36 +287,95 @@ for raw in socket_raw.splitlines():
         "remote": remote,
         "local": local,
         "state": state,
+        "connections": 1,
+        "rx": 0,
+        "tx": 0,
         "ipFamily": ip_family(source_ip),
     })
 
 streams = parse(streams_raw, {})
+stream_clients = {}
 for stream in streams.get("streams", []):
-    remote = stream.get("remote_addr") or stream.get("remote") or ""
+    remote = stream.get("remote_addr") or stream.get("remoteAddr") or stream.get("remote") or ""
     source_ip = clean_source_ip(remote)
     if not source_ip:
         continue
-    key = ("hysteria-stream", source_ip, remote, stream.get("req_addr", ""))
-    if key in seen:
-        continue
-    seen.add(key)
-    connections.append({
+    item = stream_clients.setdefault(source_ip, {
         "protocol": "hysteria-stream",
         "sourceIp": source_ip,
         "remote": remote,
-        "local": stream.get("req_addr", ""),
-        "state": stream.get("state", "stream"),
+        "local": "",
+        "state": "stream",
         "auth": stream.get("auth"),
-        "tx": stream.get("tx", 0),
-        "rx": stream.get("rx", 0),
+        "tx": 0,
+        "rx": 0,
+        "connections": 0,
         "ipFamily": ip_family(source_ip),
     })
+    item["tx"] += as_int(stream.get("tx", 0))
+    item["rx"] += as_int(stream.get("rx", 0))
+    item["connections"] += 1
+    if not item.get("auth") and stream.get("auth"):
+        item["auth"] = stream.get("auth")
+
+for item in stream_clients.values():
+    key = ("hysteria-client", item["sourceIp"])
+    if key in seen:
+        continue
+    seen.add(key)
+    connections.append(item)
+
+def compact_client_connections(rows):
+    bucket = {}
+    for connection in rows:
+        source_ip = normalize_ip(connection.get("sourceIp", ""))
+        if not source_ip:
+            continue
+        item = bucket.setdefault(source_ip, {
+            "protocol": "",
+            "protocols": set(),
+            "sourceIp": source_ip,
+            "remote": "",
+            "local": "",
+            "state": "",
+            "auth": connection.get("auth"),
+            "rx": 0,
+            "tx": 0,
+            "connections": 0,
+            "ipFamily": ip_family(source_ip),
+        })
+        protocol_value = connection.get("protocol")
+        if protocol_value:
+            item["protocols"].add(protocol_value)
+        if not item["remote"] and connection.get("remote"):
+            item["remote"] = connection.get("remote")
+        if not item["local"] and connection.get("local"):
+            item["local"] = connection.get("local")
+        if not item["state"] and connection.get("state"):
+            item["state"] = connection.get("state")
+        if not item.get("auth") and connection.get("auth"):
+            item["auth"] = connection.get("auth")
+        item["rx"] += as_int(connection.get("rx", 0))
+        item["tx"] += as_int(connection.get("tx", 0))
+        item["connections"] += max(1, as_int(connection.get("connections", 1)))
+    compacted = []
+    for item in bucket.values():
+        protocols = sorted(item.pop("protocols"))
+        item["protocols"] = protocols
+        item["protocol"] = "/".join(protocols) if protocols else service_proto
+        item["state"] = item["state"] or "active"
+        compacted.append(item)
+    compacted.sort(key=lambda item: (item["rx"] + item["tx"], item["connections"]), reverse=True)
+    return compacted
+
+connections = compact_client_connections(connections)
 
 remote_traffic = nft_remote_traffic(nft_json_raw, nft_prefix, service_proto)
 conntrack_traffic = conntrack_remote_traffic(conntrack_raw, port)
 for remote_ip, item in conntrack_traffic.items():
     existing = remote_traffic.setdefault(remote_ip, {
         "remoteIp": remote_ip,
+        "clientIp": remote_ip,
         "ipFamily": item.get("ipFamily"),
         "rx": 0,
         "tx": 0,
@@ -329,6 +393,7 @@ for connection in connections:
         continue
     item = remote_traffic.setdefault(source_ip, {
         "remoteIp": source_ip,
+        "clientIp": source_ip,
         "ipFamily": ip_family(source_ip),
         "rx": 0,
         "tx": 0,
@@ -336,9 +401,13 @@ for connection in connections:
         "protocols": set(),
     })
     if item["connections"] == 0:
-        item["connections"] = 1
-    if connection.get("protocol"):
-        item["protocols"].add(connection["protocol"])
+        item["connections"] = max(1, as_int(connection.get("connections", 1)))
+    if item["rx"] + item["tx"] == 0 and (connection.get("rx") or connection.get("tx")):
+        item["rx"] = as_int(connection.get("rx", 0))
+        item["tx"] = as_int(connection.get("tx", 0))
+    for protocol_value in connection.get("protocols") or [connection.get("protocol")]:
+        if protocol_value:
+            item["protocols"].add(protocol_value)
 
 remote_traffic_list = []
 for item in remote_traffic.values():

@@ -10,6 +10,7 @@ const hookNames = [
   "hysteria2-deploy.sh",
   "trojan-deploy.sh",
   "server-status.sh",
+  "server-reboot.sh",
   "status.sh",
   "service.sh",
   "ban.sh",
@@ -38,6 +39,7 @@ BIND = os.environ.get("SIMPLEUI_HOOK_BIND", "0.0.0.0")
 ALLOWED = {
     "deploy": {"hysteria2": "hysteria2-deploy.sh", "trojan": "trojan-deploy.sh"},
     "server-status": "server-status.sh",
+    "server-reboot": "server-reboot.sh",
     "status": "status.sh",
     "service": "service.sh",
     "ban": "ban.sh",

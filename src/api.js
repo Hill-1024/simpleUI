@@ -1,16 +1,35 @@
 const jsonHeaders = { "Content-Type": "application/json" };
 
 async function request(path, options = {}) {
-  const response = await fetch(path, options);
+  const response = await fetch(path, { credentials: "same-origin", ...options });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const message = typeof data.error === "string" ? data.error : "请求失败";
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
   }
   return data;
 }
 
 export const api = {
+  session: () => request("/api/auth/session"),
+  login: (password) =>
+    request("/api/auth/login", {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify({ password })
+    }),
+  logout: () =>
+    request("/api/auth/logout", {
+      method: "POST"
+    }),
+  changePassword: (payload) =>
+    request("/api/auth/password", {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify(payload)
+    }),
   bootstrap: () => request("/api/bootstrap"),
   sync: () =>
     request("/api/sync", {
@@ -35,6 +54,10 @@ export const api = {
   forceClearServer: (id) =>
     request(`/api/servers/${id}?force=1`, {
       method: "DELETE"
+    }),
+  rebootServer: (id) =>
+    request(`/api/servers/${id}/reboot`, {
+      method: "POST"
     }),
   deleteNode: (id) =>
     request(`/api/nodes/${id}`, {

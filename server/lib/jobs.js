@@ -165,6 +165,7 @@ export async function applyStatusResult({ server, node, status, jobId, audit = t
       savedNode.onlineUsers = status.online && Object.keys(status.online).length
         ? onlineCount(status.online)
         : (uniqueRemoteIps.size || (status.remoteTraffic || []).length || savedNode.onlineUsers);
+      savedNode.lastSyncError = "";
       savedNode.lastCheckedAt = timestamp;
       savedNode.updatedAt = timestamp;
     }
@@ -175,23 +176,30 @@ export async function applyStatusResult({ server, node, status, jobId, audit = t
         nodeId: node.id,
         serverId: server.id,
         protocol: connection.protocol || node.protocol,
+        protocols: connection.protocols || (connection.protocol ? [connection.protocol] : [node.protocol]),
         sourceIp: connection.sourceIp,
         ipFamily: connection.ipFamily,
         remote: connection.remote,
         local: connection.local,
         state: connection.state,
+        rx: Number(connection.rx || 0),
+        tx: Number(connection.tx || 0),
+        total: Number(connection.total || Number(connection.rx || 0) + Number(connection.tx || 0)),
+        connections: Number(connection.connections || 1),
         lastSeenAt: timestamp
       }, true));
     }
 
     state.remoteTraffic = (state.remoteTraffic || []).filter((item) => item.nodeId !== node.id);
     for (const item of status.remoteTraffic || []) {
+      const clientIp = item.clientIp || item.remoteIp;
       const rx = Number(item.rx || 0);
       const tx = Number(item.tx || 0);
       state.remoteTraffic.push(stamp({
         nodeId: node.id,
         serverId: server.id,
-        remoteIp: item.remoteIp,
+        remoteIp: clientIp,
+        clientIp,
         ipFamily: item.ipFamily,
         rx,
         tx,
@@ -712,6 +720,17 @@ export async function runServerAction({ type, title, server, extra = {}, secrets
   const secretValues = [server?.hookToken, ...secrets].flat();
   queueMicrotask(async () => {
     await patchJob(job.id, { status: "running" });
+    if (type === "server-reboot") {
+      await mutateDb((state) => {
+        const savedServer = state.servers.find((item) => item.id === server.id);
+        if (savedServer) {
+          savedServer.status = "rebooting";
+          savedServer.hookStatus = "rebooting";
+          savedServer.updatedAt = new Date().toISOString();
+        }
+        appendAudit(state, "server-reboot.start", `${title} requested`, { serverId: server.id, jobId: job.id });
+      });
+    }
     try {
       const result = await callHookAgent({
         server,
@@ -731,8 +750,8 @@ export async function runServerAction({ type, title, server, extra = {}, secrets
       await mutateDb((state) => {
         const savedServer = state.servers.find((item) => item.id === server.id);
         if (savedServer) {
-          savedServer.status = "online";
-          savedServer.hookStatus = "online";
+          savedServer.status = type === "server-reboot" ? "rebooting" : "online";
+          savedServer.hookStatus = type === "server-reboot" ? "rebooting" : "online";
           savedServer.updatedAt = new Date().toISOString();
         }
         appendAudit(state, `${type}.complete`, `${title} completed`, { serverId: server.id, jobId: job.id });
@@ -744,6 +763,9 @@ export async function runServerAction({ type, title, server, extra = {}, secrets
         const savedServer = state.servers.find((item) => item.id === server.id);
         if (savedServer) {
           savedServer.status = "warning";
+          if (type === "server-reboot") {
+            savedServer.hookStatus = "online";
+          }
           savedServer.updatedAt = new Date().toISOString();
         }
         appendAudit(state, `${type}.failed`, `${title} failed`, { serverId: server.id, jobId: job.id });

@@ -7,6 +7,17 @@ import cors from "cors";
 import helmet from "helmet";
 import { v4 as uuid } from "uuid";
 import { z } from "zod";
+import {
+  AUTH_COOKIE,
+  authenticateRequest,
+  changePassword,
+  clearSessionCookie,
+  ensureAuthInitialized,
+  loginWithPassword,
+  logoutSession,
+  parseCookies,
+  setSessionCookie
+} from "./lib/auth.js";
 import { appendAudit, loadDb, mutateDb, publicServer, publicState, stamp } from "./lib/db.js";
 import { DEFAULT_HOOK_PORT, createHookToken } from "./lib/hook-agent.js";
 import {
@@ -31,10 +42,22 @@ const clientDist = path.join(rootDir, "dist/client");
 const app = express();
 const port = Number(process.env.PORT || process.env.SIMPLEUI_PORT || 8787);
 const host = process.env.SIMPLEUI_HOST || "127.0.0.1";
-const isProduction = process.env.NODE_ENV === "production" || process.env.SIMPLEUI_DESKTOP === "1";
+const isDesktop = process.env.SIMPLEUI_DESKTOP === "1";
+const isProduction = process.env.NODE_ENV === "production" || isDesktop;
+const authRequired = process.env.SIMPLEUI_AUTH_DISABLED !== "1" && process.env.NODE_ENV === "production" && !isDesktop;
 const syncIntervalMs = Number(process.env.SIMPLEUI_SYNC_INTERVAL_MS || 15_000);
 let syncInFlight = false;
 
+if (authRequired) {
+  const authInit = await ensureAuthInitialized();
+  if (authInit.created) {
+    console.log("SimpleUI initial WebUI password:");
+    console.log(authInit.initialPassword);
+    console.log("Use this UUID password to sign in, then change it from the WebUI.");
+  }
+}
+
+app.set("trust proxy", 1);
 app.use(express.json({ limit: "1mb" }));
 app.use(cors());
 app.use(
@@ -107,6 +130,15 @@ const ipQualitySchema = z.object({
   proxy: z.string().optional().default(""),
   fullIp: z.coerce.boolean().optional().default(false),
   privacy: z.coerce.boolean().optional().default(false)
+});
+
+const loginSchema = z.object({
+  password: z.string().min(1)
+});
+
+const passwordChangeSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(8).max(256)
 });
 
 function normalizeHost(host) {
@@ -250,8 +282,9 @@ async function syncAllStatuses() {
   syncInFlight = true;
   try {
     const state = await loadDb();
+    const syncableStatuses = new Set(["online", "rebooting", "unreachable", "warning"]);
     const servers = (state.servers || []).filter((server) =>
-      server.hookStatus === "online" || server.hookInstalled
+      server.hookUrl && server.hookToken && syncableStatuses.has(server.hookStatus || server.status)
     );
     const results = await Promise.allSettled(
       servers.map((server) =>
@@ -273,6 +306,70 @@ async function syncAllStatuses() {
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, mode: isProduction ? "production" : "development" });
+});
+
+app.get("/api/auth/session", async (req, res) => {
+  if (!authRequired) {
+    res.json({ authenticated: true, authRequired: false });
+    return;
+  }
+  const auth = await authenticateRequest(req);
+  res.json({ authenticated: Boolean(auth), authRequired: true });
+});
+
+app.post("/api/auth/login", async (req, res) => {
+  if (!authRequired) {
+    res.json({ ok: true });
+    return;
+  }
+  const data = parseBody(loginSchema, req, res);
+  if (!data) return;
+  const result = await loginWithPassword(data.password);
+  if (!result.ok) {
+    res.status(401).json({ error: "Invalid password" });
+    return;
+  }
+  setSessionCookie(res, result.token, req);
+  res.json({ ok: true });
+});
+
+app.post("/api/auth/logout", async (req, res) => {
+  if (authRequired) await logoutSession(parseCookies(req)[AUTH_COOKIE]);
+  clearSessionCookie(res, req);
+  res.json({ ok: true });
+});
+
+app.use("/api", async (req, res, next) => {
+  if (!authRequired) {
+    next();
+    return;
+  }
+  const auth = await authenticateRequest(req);
+  if (!auth) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+  req.auth = auth;
+  next();
+});
+
+app.post("/api/auth/password", async (req, res) => {
+  if (!authRequired) {
+    res.status(409).json({ error: "Authentication is disabled in this runtime" });
+    return;
+  }
+  const data = parseBody(passwordChangeSchema, req, res);
+  if (!data) return;
+  const result = await changePassword({
+    tokenHash: req.auth.tokenHash,
+    currentPassword: data.currentPassword,
+    newPassword: data.newPassword
+  });
+  if (!result.ok) {
+    res.status(400).json({ error: result.error || "Password change failed" });
+    return;
+  }
+  res.json({ ok: true });
 });
 
 app.get("/api/bootstrap", async (_req, res) => {
@@ -390,6 +487,20 @@ app.delete("/api/servers/:id", async (req, res) => {
   });
   queueMicrotask(() => runDeleteServerJob(job, { server }));
   res.status(202).json({ job, server: publicServer({ ...server, status: "deleting", hookStatus: "deleting" }) });
+});
+
+app.post("/api/servers/:id/reboot", async (req, res) => {
+  const server = await requireReadyServer(req.params.id, res);
+  if (!server) return;
+
+  const job = await runServerAction({
+    type: "server-reboot",
+    title: `Reboot ${server.name}`,
+    server,
+    extra: { SIMPLEUI_REBOOT_DELAY: "8" },
+    timeoutMs: 30_000
+  });
+  res.status(202).json({ job });
 });
 
 app.post("/api/deployments", async (req, res) => {

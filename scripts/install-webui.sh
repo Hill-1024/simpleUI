@@ -103,8 +103,17 @@ WantedBy=multi-user.target
 SERVICE
 
 systemctl daemon-reload
-systemctl enable --now simpleui-web.service
+systemctl enable simpleui-web.service
+systemctl restart simpleui-web.service
+sleep 1
 
 echo "SimpleUI WebUI deployed."
 echo "Service: simpleui-web.service"
 echo "URL: http://${HOST}:${PORT}"
+INITIAL_PASSWORD="$(journalctl -u simpleui-web.service -n 80 --no-pager 2>/dev/null | awk '/SimpleUI initial WebUI password:/{getline; print; exit}')"
+if [[ -n "${INITIAL_PASSWORD}" ]]; then
+  echo "Initial WebUI password: ${INITIAL_PASSWORD}"
+  echo "Sign in with this UUID password, then change it from the WebUI About page."
+else
+  echo "Initial WebUI password was already generated. If needed, inspect: sudo journalctl -u simpleui-web.service --no-pager"
+fi
