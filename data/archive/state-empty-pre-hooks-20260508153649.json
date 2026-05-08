@@ -1,0 +1,21 @@
+{
+  "meta": {
+    "version": 1,
+    "createdAt": "2026-05-08T07:26:12.962Z",
+    "updatedAt": "2026-05-08T07:26:12.968Z"
+  },
+  "servers": [],
+  "nodes": [],
+  "users": [],
+  "connections": [],
+  "bans": [],
+  "jobs": [],
+  "audit": [
+    {
+      "id": "6c6eb727-fd43-43df-b592-b1494f8a8538",
+      "type": "system.init",
+      "message": "State initialized. Deploy a real node to begin.",
+      "createdAt": "2026-05-08T07:26:12.968Z"
+    }
+  ]
+}

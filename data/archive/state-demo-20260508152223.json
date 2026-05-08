@@ -1,0 +1,290 @@
+{
+  "meta": {
+    "version": 1,
+    "createdAt": "2026-05-08T07:15:01.346Z",
+    "updatedAt": "2026-05-08T07:15:02.296Z"
+  },
+  "servers": [
+    {
+      "id": "66fea2af-6f6b-4a69-bca9-0d70c7e655aa",
+      "name": "Tokyo Edge 01",
+      "host": "203.0.113.18",
+      "port": 22,
+      "labels": [
+        "demo",
+        "jp"
+      ],
+      "status": "online",
+      "sshUserHint": "root",
+      "location": "Tokyo",
+      "provider": "sample",
+      "isDemo": true,
+      "createdAt": "2026-05-08T07:15:01.351Z",
+      "updatedAt": "2026-05-08T07:15:01.374Z"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "162bccae-d81e-437f-bd81-1391db54c6cd",
+      "serverId": "66fea2af-6f6b-4a69-bca9-0d70c7e655aa",
+      "protocol": "hysteria2",
+      "name": "HY2 Tokyo Primary",
+      "endpoint": "hy2.example.com:443",
+      "listenPort": 443,
+      "domain": "hy2.example.com",
+      "status": "online",
+      "traffic": {
+        "tx": 64382833,
+        "rx": 140229321
+      },
+      "onlineUsers": 3,
+      "capability": [
+        "user-traffic",
+        "kick",
+        "ip-ban",
+        "command-auth"
+      ],
+      "createdAt": "2026-05-08T07:15:01.351Z",
+      "updatedAt": "2026-05-08T07:15:01.374Z",
+      "lastCheckedAt": "2026-05-08T07:15:01.374Z"
+    },
+    {
+      "id": "edc9ee47-6048-484e-ac47-b7ac157658dc",
+      "serverId": "66fea2af-6f6b-4a69-bca9-0d70c7e655aa",
+      "protocol": "trojan",
+      "name": "Trojan Tokyo Fallback",
+      "endpoint": "trojan.example.com:443",
+      "listenPort": 443,
+      "domain": "trojan.example.com",
+      "status": "warning",
+      "traffic": {
+        "tx": 321429001,
+        "rx": 765109122
+      },
+      "onlineUsers": 6,
+      "capability": [
+        "password-list",
+        "ip-ban",
+        "service-control"
+      ],
+      "createdAt": "2026-05-08T07:15:01.351Z",
+      "updatedAt": "2026-05-08T07:15:01.351Z"
+    }
+  ],
+  "users": [
+    {
+      "id": "51bf2ff2-8c00-49df-9cb9-82cbb10df8ff",
+      "username": "anna",
+      "nodeIds": [
+        "162bccae-d81e-437f-bd81-1391db54c6cd",
+        "edc9ee47-6048-484e-ac47-b7ac157658dc"
+      ],
+      "status": "active",
+      "tx": 64382833,
+      "rx": 140229321,
+      "lastSeenAt": "2026-05-08T07:15:01.374Z",
+      "updatedAt": "2026-05-08T07:15:01.374Z"
+    },
+    {
+      "id": "98fe7a5d-1e33-4b8d-bc87-66741aaabc68",
+      "username": "mika",
+      "nodeIds": [
+        "162bccae-d81e-437f-bd81-1391db54c6cd"
+      ],
+      "status": "active",
+      "tx": 21720388,
+      "rx": 95298302,
+      "lastSeenAt": "2026-05-08T07:15:01.351Z"
+    }
+  ],
+  "connections": [
+    {
+      "id": "8b77eb80-3258-4600-bd87-116d96627145",
+      "nodeId": "edc9ee47-6048-484e-ac47-b7ac157658dc",
+      "serverId": "66fea2af-6f6b-4a69-bca9-0d70c7e655aa",
+      "protocol": "tcp",
+      "sourceIp": "198.51.100.41",
+      "remote": "198.51.100.41:51818",
+      "local": "203.0.113.18:443",
+      "state": "ESTAB",
+      "lastSeenAt": "2026-05-08T07:15:01.351Z"
+    },
+    {
+      "nodeId": "162bccae-d81e-437f-bd81-1391db54c6cd",
+      "serverId": "66fea2af-6f6b-4a69-bca9-0d70c7e655aa",
+      "protocol": "udp",
+      "sourceIp": "198.51.100.22",
+      "remote": "198.51.100.22:51330",
+      "local": "203.0.113.18:443",
+      "state": "ESTAB",
+      "lastSeenAt": "2026-05-08T07:15:01.374Z",
+      "id": "4fb9fcf8-6938-45e4-86ce-e79d9685672b",
+      "createdAt": "2026-05-08T07:15:01.374Z",
+      "updatedAt": "2026-05-08T07:15:01.374Z"
+    },
+    {
+      "nodeId": "162bccae-d81e-437f-bd81-1391db54c6cd",
+      "serverId": "66fea2af-6f6b-4a69-bca9-0d70c7e655aa",
+      "protocol": "udp",
+      "sourceIp": "198.51.100.41",
+      "remote": "198.51.100.41:51818",
+      "local": "203.0.113.18:443",
+      "state": "ESTAB",
+      "lastSeenAt": "2026-05-08T07:15:01.374Z",
+      "id": "e3fc7d38-2402-481a-8722-e51f7b0f0245",
+      "createdAt": "2026-05-08T07:15:01.374Z",
+      "updatedAt": "2026-05-08T07:15:01.374Z"
+    }
+  ],
+  "bans": [
+    {
+      "targetKind": "source-ip",
+      "target": "198.51.100.41",
+      "nodeIds": [
+        "162bccae-d81e-437f-bd81-1391db54c6cd",
+        "edc9ee47-6048-484e-ac47-b7ac157658dc"
+      ],
+      "status": "active",
+      "id": "7cef66a3-f96a-467a-802e-300d3fd0a6de",
+      "createdAt": "2026-05-08T07:15:02.290Z",
+      "updatedAt": "2026-05-08T07:15:02.290Z"
+    }
+  ],
+  "jobs": [
+    {
+      "id": "f932e516-859e-4721-81d9-c50d8f4660e7",
+      "type": "status",
+      "title": "Refresh HY2 Tokyo Primary",
+      "status": "success",
+      "payload": {
+        "protocol": "hysteria2",
+        "serverId": "66fea2af-6f6b-4a69-bca9-0d70c7e655aa",
+        "nodeId": "162bccae-d81e-437f-bd81-1391db54c6cd"
+      },
+      "logs": [
+        "{\n  \"service\": \"hysteria-server.service\",\n  \"active\": \"active\",\n  \"version\": \"hysteria v2 demo\",\n  \"online\": {\n    \"anna\": 2,\n    \"mika\": 1\n  },\n  \"traffic\": {\n    \"anna\": {\n      \"tx\": 64382833,\n      \"rx\": 140229321\n    }\n  },\n  \"interfaces\": {\n    \"rx\": 1664022144,\n    \"tx\": 1193741204\n  },\n  \"connections\": [\n    {\n      \"protocol\": \"udp\",\n      \"sourceIp\": \"198.51.100.22\",\n      \"remote\": \"198.51.100.22:51330\",\n      \"local\": \"203.0.113.18:443\",\n      \"state\": \"ESTAB\"\n    },\n    {\n      \"protocol\": \"udp\",\n      \"sourceIp\": \"198.51.100.41\",\n      \"remote\": \"198.51.100.41:51818\",\n      \"local\": \"203.0.113.18:443\",\n      \"state\": \"ESTAB\"\n    }\n  ]\n}\n"
+      ],
+      "createdAt": "2026-05-08T07:15:01.370Z",
+      "updatedAt": "2026-05-08T07:15:01.375Z",
+      "result": {
+        "service": "hysteria-server.service",
+        "active": "active",
+        "version": "hysteria v2 demo",
+        "online": {
+          "anna": 2,
+          "mika": 1
+        },
+        "traffic": {
+          "anna": {
+            "tx": 64382833,
+            "rx": 140229321
+          }
+        },
+        "interfaces": {
+          "rx": 1664022144,
+          "tx": 1193741204
+        },
+        "connections": [
+          {
+            "protocol": "udp",
+            "sourceIp": "198.51.100.22",
+            "remote": "198.51.100.22:51330",
+            "local": "203.0.113.18:443",
+            "state": "ESTAB"
+          },
+          {
+            "protocol": "udp",
+            "sourceIp": "198.51.100.41",
+            "remote": "198.51.100.41:51818",
+            "local": "203.0.113.18:443",
+            "state": "ESTAB"
+          }
+        ]
+      }
+    },
+    {
+      "id": "319460b3-6966-4f4e-8640-8a7429dc5cbf",
+      "type": "ban",
+      "title": "Block source IP 198.51.100.41 on HY2 Tokyo Primary",
+      "status": "success",
+      "payload": {
+        "protocol": "hysteria2",
+        "serverId": "66fea2af-6f6b-4a69-bca9-0d70c7e655aa",
+        "nodeId": "162bccae-d81e-437f-bd81-1391db54c6cd"
+      },
+      "logs": [
+        "{\n  \"ok\": true,\n  \"demo\": true,\n  \"targetIp\": \"******\"\n}\n"
+      ],
+      "createdAt": "2026-05-08T07:15:02.283Z",
+      "updatedAt": "2026-05-08T07:15:02.292Z",
+      "result": {
+        "ok": true,
+        "demo": true,
+        "targetIp": "198.51.100.41"
+      }
+    },
+    {
+      "id": "8fcc3fa4-f9cc-4de9-a602-0f3939d66405",
+      "type": "ban",
+      "title": "Block source IP 198.51.100.41 on Trojan Tokyo Fallback",
+      "status": "success",
+      "payload": {
+        "protocol": "trojan",
+        "serverId": "66fea2af-6f6b-4a69-bca9-0d70c7e655aa",
+        "nodeId": "edc9ee47-6048-484e-ac47-b7ac157658dc"
+      },
+      "logs": [
+        "{\n  \"ok\": true,\n  \"demo\": true,\n  \"targetIp\": \"******\"\n}\n"
+      ],
+      "createdAt": "2026-05-08T07:15:02.284Z",
+      "updatedAt": "2026-05-08T07:15:02.296Z",
+      "result": {
+        "ok": true,
+        "demo": true,
+        "targetIp": "198.51.100.41"
+      }
+    }
+  ],
+  "audit": [
+    {
+      "id": "5f2a865e-e58a-4bad-9d3d-fb7dca09a4ae",
+      "type": "system.seed",
+      "message": "Demo data created. Add a real server to run hooks over SSH.",
+      "createdAt": "2026-05-08T07:15:01.351Z"
+    },
+    {
+      "id": "cd72a3cc-866f-4663-ac2b-b8c7bd28f4a7",
+      "type": "job.status",
+      "message": "Refresh HY2 Tokyo Primary queued",
+      "jobId": "f932e516-859e-4721-81d9-c50d8f4660e7",
+      "createdAt": "2026-05-08T07:15:01.370Z"
+    },
+    {
+      "id": "8d634f95-1754-40d1-8197-58ddefc984a7",
+      "type": "status.refresh",
+      "message": "HY2 Tokyo Primary status refreshed",
+      "jobId": "f932e516-859e-4721-81d9-c50d8f4660e7",
+      "createdAt": "2026-05-08T07:15:01.374Z"
+    },
+    {
+      "id": "dd55610b-5a8b-493c-b622-4af20b816a7a",
+      "type": "job.ban",
+      "message": "Block source IP 198.51.100.41 on HY2 Tokyo Primary queued",
+      "jobId": "319460b3-6966-4f4e-8640-8a7429dc5cbf",
+      "createdAt": "2026-05-08T07:15:02.283Z"
+    },
+    {
+      "id": "c48ef3f5-ba35-4e19-8cfb-0c305a13a650",
+      "type": "job.ban",
+      "message": "Block source IP 198.51.100.41 on Trojan Tokyo Fallback queued",
+      "jobId": "8fcc3fa4-f9cc-4de9-a602-0f3939d66405",
+      "createdAt": "2026-05-08T07:15:02.286Z"
+    },
+    {
+      "id": "b5d2dfef-740a-430a-aecb-562bd677e23f",
+      "type": "ban.create",
+      "message": "Block source IP 198.51.100.41 on 2 node(s)",
+      "createdAt": "2026-05-08T07:15:02.290Z"
+    }
+  ]
+}

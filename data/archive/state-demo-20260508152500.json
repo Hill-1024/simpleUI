@@ -1,0 +1,132 @@
+{
+  "meta": {
+    "version": 1,
+    "createdAt": "2026-05-08T07:23:25.941Z",
+    "updatedAt": "2026-05-08T07:23:25.941Z"
+  },
+  "servers": [
+    {
+      "id": "30f9892e-4e9f-450f-8e99-3eaf250fab8b",
+      "name": "Tokyo Edge 01",
+      "host": "203.0.113.18",
+      "port": 22,
+      "labels": [
+        "demo",
+        "jp"
+      ],
+      "status": "online",
+      "sshUserHint": "root",
+      "location": "Tokyo",
+      "provider": "sample",
+      "isDemo": true,
+      "createdAt": "2026-05-08T07:23:25.941Z",
+      "updatedAt": "2026-05-08T07:23:25.941Z"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "6fb802b9-9b28-41e0-9a3e-b3475e2245c0",
+      "serverId": "30f9892e-4e9f-450f-8e99-3eaf250fab8b",
+      "protocol": "hysteria2",
+      "name": "HY2 Tokyo Primary",
+      "endpoint": "hy2.example.com:443",
+      "listenPort": 443,
+      "domain": "hy2.example.com",
+      "status": "online",
+      "traffic": {
+        "tx": 912316293,
+        "rx": 1412391293
+      },
+      "onlineUsers": 18,
+      "capability": [
+        "user-traffic",
+        "kick",
+        "ip-ban",
+        "command-auth"
+      ],
+      "createdAt": "2026-05-08T07:23:25.941Z",
+      "updatedAt": "2026-05-08T07:23:25.941Z"
+    },
+    {
+      "id": "987b94e9-00bf-4ec9-b18b-6040a2808c70",
+      "serverId": "30f9892e-4e9f-450f-8e99-3eaf250fab8b",
+      "protocol": "trojan",
+      "name": "Trojan Tokyo Fallback",
+      "endpoint": "trojan.example.com:443",
+      "listenPort": 443,
+      "domain": "trojan.example.com",
+      "status": "warning",
+      "traffic": {
+        "tx": 321429001,
+        "rx": 765109122
+      },
+      "onlineUsers": 6,
+      "capability": [
+        "password-list",
+        "ip-ban",
+        "service-control"
+      ],
+      "createdAt": "2026-05-08T07:23:25.941Z",
+      "updatedAt": "2026-05-08T07:23:25.941Z"
+    }
+  ],
+  "users": [
+    {
+      "id": "0d9ee5e8-82b7-46c6-b4e2-ad66df3574ac",
+      "username": "anna",
+      "nodeIds": [
+        "6fb802b9-9b28-41e0-9a3e-b3475e2245c0",
+        "987b94e9-00bf-4ec9-b18b-6040a2808c70"
+      ],
+      "status": "active",
+      "tx": 64382833,
+      "rx": 140229321,
+      "lastSeenAt": "2026-05-08T07:23:25.941Z"
+    },
+    {
+      "id": "1097a98e-a4fc-4b24-9045-c2a2a778df66",
+      "username": "mika",
+      "nodeIds": [
+        "6fb802b9-9b28-41e0-9a3e-b3475e2245c0"
+      ],
+      "status": "active",
+      "tx": 21720388,
+      "rx": 95298302,
+      "lastSeenAt": "2026-05-08T07:23:25.941Z"
+    }
+  ],
+  "connections": [
+    {
+      "id": "f710a56a-bd2f-410b-b434-a4408f9a8c08",
+      "nodeId": "6fb802b9-9b28-41e0-9a3e-b3475e2245c0",
+      "serverId": "30f9892e-4e9f-450f-8e99-3eaf250fab8b",
+      "protocol": "udp",
+      "sourceIp": "198.51.100.22",
+      "remote": "198.51.100.22:51330",
+      "local": "203.0.113.18:443",
+      "state": "ESTAB",
+      "lastSeenAt": "2026-05-08T07:23:25.941Z"
+    },
+    {
+      "id": "438b69bf-f783-4267-b3cf-866aba67589a",
+      "nodeId": "987b94e9-00bf-4ec9-b18b-6040a2808c70",
+      "serverId": "30f9892e-4e9f-450f-8e99-3eaf250fab8b",
+      "protocol": "tcp",
+      "sourceIp": "198.51.100.41",
+      "remote": "198.51.100.41:51818",
+      "local": "203.0.113.18:443",
+      "state": "ESTAB",
+      "lastSeenAt": "2026-05-08T07:23:25.941Z"
+    }
+  ],
+  "bans": [],
+  "jobs": [],
+  "audit": [
+    {
+      "id": "9768cbc4-6b07-4759-9d9a-1add4195ba57",
+      "type": "system.seed",
+      "message": "Demo data created. Add a real server to run hooks over SSH.",
+      "createdAt": "2026-05-08T07:23:25.941Z"
+    }
+  ]
+}
