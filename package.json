@@ -70,6 +70,7 @@
     },
     "linux": {
       "category": "Network",
+      "maintainer": "Hill-1024 <3520363913@qq.com>",
       "target": [
         "deb",
         "zip"
