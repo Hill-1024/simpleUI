@@ -69,7 +69,7 @@ const projectInfo = {
 };
 const releaseTargets = [
   { platform: "Windows", arch: "x64", packages: "exe / zip" },
-  { platform: "macOS", arch: "x64 / arm64", packages: "dmg / zip" },
+  { platform: "macOS", arch: "arm64", packages: "dmg / zip" },
   { platform: "Linux", arch: "x64", packages: "deb / zip" }
 ];
 const selectedNodes = ref([]);

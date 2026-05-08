@@ -112,7 +112,7 @@ Electron 会在本机进程内启动同一套 Node API，然后加载 Vue 构建
 推送 `v*` tag 或在 Actions 手动触发 `Release` 工作流会自动构建并上传：
 
 - `SimpleUI_版本_Windows_x64.exe` 与 `SimpleUI_版本_Windows_x64.zip`
-- `SimpleUI_版本_macOS_x64.dmg`、`SimpleUI_版本_macOS_x64.zip`、`SimpleUI_版本_macOS_arm64.dmg`、`SimpleUI_版本_macOS_arm64.zip`
+- `SimpleUI_版本_macOS_arm64.dmg` 与 `SimpleUI_版本_macOS_arm64.zip`
 - `SimpleUI_版本_Linux_x64.deb` 与 `SimpleUI_版本_Linux_x64.zip`
 
 工作流会先执行 `pnpm check`、`pnpm build`，再按平台运行 electron-builder，并把产物发布到对应 GitHub Release。
