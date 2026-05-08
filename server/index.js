@@ -30,6 +30,7 @@ const clientDist = path.join(rootDir, "dist/client");
 
 const app = express();
 const port = Number(process.env.PORT || process.env.SIMPLEUI_PORT || 8787);
+const host = process.env.SIMPLEUI_HOST || "127.0.0.1";
 const isProduction = process.env.NODE_ENV === "production" || process.env.SIMPLEUI_DESKTOP === "1";
 const syncIntervalMs = Number(process.env.SIMPLEUI_SYNC_INTERVAL_MS || 15_000);
 let syncInFlight = false;
@@ -755,8 +756,8 @@ if (fs.existsSync(clientDist)) {
   });
 }
 
-app.listen(port, "127.0.0.1", () => {
-  console.log(`SimpleUI API listening on http://127.0.0.1:${port}`);
+app.listen(port, host, () => {
+  console.log(`SimpleUI API listening on http://${host}:${port}`);
   if (syncIntervalMs > 0) {
     setTimeout(() => syncAllStatuses().catch((error) => console.warn(`Initial status sync failed: ${error.message}`)), 1500);
     setInterval(() => syncAllStatuses().catch((error) => console.warn(`Status sync failed: ${error.message}`)), syncIntervalMs);

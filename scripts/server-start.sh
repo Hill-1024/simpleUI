@@ -2,6 +2,6 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-pnpm install --prod
+pnpm install --frozen-lockfile
 pnpm build
 exec pnpm start

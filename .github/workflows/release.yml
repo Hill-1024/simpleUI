@@ -1,0 +1,112 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }} ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: Windows
+            arch: x64
+            runner: windows-latest
+            command: pnpm exec electron-builder --win nsis zip --x64 --publish never
+          - platform: macOS
+            arch: x64
+            runner: macos-13
+            command: pnpm exec electron-builder --mac dmg zip --x64 --publish never
+          - platform: macOS
+            arch: arm64
+            runner: macos-14
+            command: pnpm exec electron-builder --mac dmg zip --arm64 --publish never
+          - platform: Linux
+            arch: x64
+            runner: ubuntu-latest
+            command: pnpm exec electron-builder --linux deb zip --x64 --publish never
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.2
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check sources
+        run: pnpm check
+
+      - name: Build client
+        run: pnpm build
+
+      - name: Build release packages
+        run: ${{ matrix.command }}
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: SimpleUI-${{ matrix.platform }}-${{ matrix.arch }}
+          if-no-files-found: error
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.deb
+            dist/*.zip
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          VERSION="$(node -p "require('./package.json').version")"
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            TAG="${GITHUB_REF_NAME}"
+            VERSION="${TAG#v}"
+          else
+            TAG="v${VERSION}"
+          fi
+
+          if ! gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release create "${TAG}" \
+              --target "${GITHUB_SHA}" \
+              --title "SimpleUI ${VERSION}" \
+              --notes "SimpleUI ${VERSION}"
+          fi
+
+          gh release upload "${TAG}" release-assets/* --clobber
