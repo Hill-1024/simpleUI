@@ -27,13 +27,27 @@ import {
   runDeleteNodeJob,
   runDeleteServerJob,
   runDeployJob,
+  runHookUpgradeJob,
   runInstallHookJob,
   runRemoteAction,
   runServerAction,
   syncServerAndNodes,
   subscribeJob
 } from "./lib/jobs.js";
-import { providerList } from "./lib/providers.js";
+import { isDeployableProtocol, monitorProtocolIds, monitorProtocolList, monitorProtocols, providerList } from "./lib/providers.js";
+import {
+  buildAllowedOrigins,
+  hasNoControlChars,
+  hasNoShellControlChars,
+  isAllowedOrigin,
+  isLoopbackBindHost,
+  isSameHostOrigin,
+  isTrustedBrowserRequest,
+  isUnsafeMethod,
+  isValidServerHost,
+  isValidUsername,
+  isValidUserPassword
+} from "./lib/security.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -44,9 +58,20 @@ const port = Number(process.env.PORT || process.env.SIMPLEUI_PORT || 8787);
 const host = process.env.SIMPLEUI_HOST || "127.0.0.1";
 const isDesktop = process.env.SIMPLEUI_DESKTOP === "1";
 const isProduction = process.env.NODE_ENV === "production" || isDesktop;
-const authRequired = process.env.SIMPLEUI_AUTH_DISABLED !== "1" && process.env.NODE_ENV === "production" && !isDesktop;
+const explicitAuthDisabled = process.env.SIMPLEUI_AUTH_DISABLED === "1";
+const authRequired = !explicitAuthDisabled && !isDesktop && (process.env.NODE_ENV === "production" || !isLoopbackBindHost(host));
+const trustProxy = process.env.SIMPLEUI_TRUST_PROXY === "1" || process.env.SIMPLEUI_TRUST_PROXY === "true";
 const syncIntervalMs = Number(process.env.SIMPLEUI_SYNC_INTERVAL_MS || 15_000);
+const allowedOrigins = buildAllowedOrigins({
+  host,
+  port,
+  includeDevOrigins: !isProduction || process.env.SIMPLEUI_DESKTOP_DEV === "1",
+  extraOrigins: process.env.SIMPLEUI_ALLOWED_ORIGINS || ""
+});
 let syncInFlight = false;
+const loginFailures = new Map();
+const LOGIN_WINDOW_MS = 15 * 60_000;
+const LOGIN_MAX_FAILURES = 8;
 
 if (authRequired) {
   const authInit = await ensureAuthInitialized();
@@ -57,49 +82,67 @@ if (authRequired) {
   }
 }
 
-app.set("trust proxy", 1);
+app.disable("x-powered-by");
+app.set("trust proxy", trustProxy ? 1 : false);
 app.use(express.json({ limit: "1mb" }));
-app.use(cors());
+app.use(cors((req, callback) => {
+  const origin = req.headers.origin;
+  const allowed = origin && (isAllowedOrigin(origin, allowedOrigins) || isSameHostOrigin(origin, req.headers.host));
+  callback(null, {
+    origin: allowed ? origin : false,
+    credentials: true
+  });
+}));
 app.use(
   helmet({
     contentSecurityPolicy: false
   })
 );
+app.use((req, res, next) => {
+  if (!isUnsafeMethod(req.method) || isTrustedBrowserRequest(req, allowedOrigins)) {
+    next();
+    return;
+  }
+  res.status(403).json({ error: "Untrusted request origin" });
+});
 
 const credentialSchema = z.object({
-  username: z.string().min(1),
-  password: z.string().optional(),
-  privateKey: z.string().optional(),
-  passphrase: z.string().optional()
+  username: z.string().min(1).max(128),
+  password: z.string().max(4096).optional(),
+  privateKey: z.string().max(64_000).optional(),
+  passphrase: z.string().max(4096).optional()
 });
 
 const serverSchema = z.object({
   id: z.string().optional(),
-  name: z.string().min(1),
-  host: z.string().min(1),
+  name: z.string().min(1).max(80),
+  host: z.string().min(1).refine(isValidServerHost, "Host must be a hostname or IP address without a scheme, path, or port"),
   port: z.coerce.number().int().min(1).max(65535).default(22),
-  sshUserHint: z.string().optional(),
-  location: z.string().optional(),
-  group: z.string().optional(),
-  labels: z.array(z.string()).optional(),
-  provider: z.string().optional()
+  sshUserHint: z.string().max(128).optional(),
+  location: z.string().max(80).optional(),
+  group: z.string().max(80).optional(),
+  labels: z.array(z.string().max(40)).max(20).optional(),
+  provider: z.string().max(80).optional()
 });
 
 const serverUpdateSchema = z.object({
-  name: z.string().min(1).optional(),
-  host: z.string().min(1).optional(),
+  name: z.string().min(1).max(80).optional(),
+  host: z.string().min(1).refine(isValidServerHost, "Host must be a hostname or IP address without a scheme, path, or port").optional(),
   port: z.coerce.number().int().min(1).max(65535).optional(),
   hookPort: z.coerce.number().int().min(1).max(65535).optional(),
-  location: z.string().optional(),
-  group: z.string().optional(),
-  labels: z.array(z.string()).optional(),
-  provider: z.string().optional()
+  location: z.string().max(80).optional(),
+  group: z.string().max(80).optional(),
+  labels: z.array(z.string().max(40)).max(20).optional(),
+  provider: z.string().max(80).optional()
 });
 
 const userSchema = z.object({
-  username: z.string().min(1),
-  password: z.string().min(1)
+  username: z.string().min(1).max(64).refine(isValidUsername, "Username cannot contain whitespace, ':', or '|'"),
+  password: z.string().min(1).max(256).refine(isValidUserPassword, "Password cannot contain newlines or '|'")
 });
+
+const monitorProtocolSchema = z.enum(monitorProtocolIds());
+const serviceProtocolSchema = z.enum(["tcp", "udp", "tcp,udp"]);
 
 const optimizeActionSchema = z.enum([
   "status",
@@ -126,10 +169,17 @@ const ipQualitySchema = z.object({
   serverId: z.string(),
   mode: z.enum(["dual", "ipv4", "ipv6"]).default("dual"),
   language: z.enum(["cn", "en", "jp", "es", "de", "fr", "ru", "pt"]).default("cn"),
-  interface: z.string().optional().default(""),
-  proxy: z.string().optional().default(""),
+  interface: z.string().max(80).refine(hasNoControlChars, "Interface cannot contain control characters").optional().default(""),
+  proxy: z.string().max(512).refine(hasNoControlChars, "Proxy cannot contain control characters").optional().default(""),
   fullIp: z.coerce.boolean().optional().default(false),
   privacy: z.coerce.boolean().optional().default(false)
+});
+
+const terminalCommandSchema = z.object({
+  serverId: z.string(),
+  command: z.string().min(1).max(16_000).refine(hasNoShellControlChars, "Command cannot contain NUL or DEL characters"),
+  cwd: z.string().max(512).refine(hasNoControlChars, "Working directory cannot contain control characters").optional().default("/root"),
+  timeoutSeconds: z.coerce.number().int().min(1).max(3600).optional().default(600)
 });
 
 const loginSchema = z.object({
@@ -192,33 +242,33 @@ function normalizeIpTarget(value) {
 const nodeSchema = z.object({
   id: z.string().optional(),
   protocol: z.enum(["hysteria2", "trojan"]),
-  name: z.string().min(1),
-  group: z.string().optional(),
-  domain: z.string().optional().default(""),
+  name: z.string().min(1).max(80),
+  group: z.string().max(80).optional(),
+  domain: z.string().max(253).refine(hasNoControlChars, "Domain cannot contain control characters").optional().default(""),
   listenPort: z.coerce.number().int().min(1).max(65535).default(443),
-  masqueradeUrl: z.string().optional(),
+  masqueradeUrl: z.string().max(512).refine(hasNoControlChars, "Masquerade URL cannot contain control characters").optional(),
   tlsMode: z.enum(["self-signed", "acme-http", "acme-dns", "acme-dns-cloudflare", "manual-cert"]).default("acme-http"),
-  acmeEmail: z.string().optional(),
-  dnsProvider: z.string().optional(),
-  dnsToken: z.string().optional(),
-  dnsOverrideDomain: z.string().optional(),
-  dnsUser: z.string().optional(),
-  dnsServer: z.string().optional(),
-  selfSignedDomain: z.string().optional(),
+  acmeEmail: z.string().max(254).refine(hasNoControlChars, "Email cannot contain control characters").optional(),
+  dnsProvider: z.string().max(80).optional(),
+  dnsToken: z.string().max(4096).refine(hasNoControlChars, "DNS token cannot contain control characters").optional(),
+  dnsOverrideDomain: z.string().max(253).refine(hasNoControlChars, "DNS override cannot contain control characters").optional(),
+  dnsUser: z.string().max(128).refine(hasNoControlChars, "DNS user cannot contain control characters").optional(),
+  dnsServer: z.string().max(253).refine(hasNoControlChars, "DNS server cannot contain control characters").optional(),
+  selfSignedDomain: z.string().max(253).refine(hasNoControlChars, "Self-signed domain cannot contain control characters").optional(),
   selfSignedIpMode: z.enum(["ipv4", "ipv6"]).optional(),
-  selfSignedHost: z.string().optional(),
-  certPath: z.string().optional(),
-  keyPath: z.string().optional(),
+  selfSignedHost: z.string().max(253).refine(hasNoControlChars, "Self-signed host cannot contain control characters").optional(),
+  certPath: z.string().max(512).refine(hasNoControlChars, "Certificate path cannot contain control characters").optional(),
+  keyPath: z.string().max(512).refine(hasNoControlChars, "Key path cannot contain control characters").optional(),
   ignoreClientBandwidth: z.coerce.boolean().optional(),
   obfsEnabled: z.coerce.boolean().optional(),
-  obfsPassword: z.string().optional(),
+  obfsPassword: z.string().max(256).refine(hasNoControlChars, "Obfs password cannot contain control characters").optional(),
   sniffEnabled: z.coerce.boolean().optional(),
   portHoppingEnabled: z.coerce.boolean().optional(),
   jumpPortStart: z.coerce.number().int().min(1).max(65535).optional(),
   jumpPortEnd: z.coerce.number().int().min(1).max(65535).optional(),
-  jumpPortInterface: z.string().optional(),
+  jumpPortInterface: z.string().max(80).refine(hasNoControlChars, "Network interface cannot contain control characters").optional(),
   jumpPortIpv6Enabled: z.coerce.boolean().optional(),
-  jumpPortIpv6Interface: z.string().optional()
+  jumpPortIpv6Interface: z.string().max(80).refine(hasNoControlChars, "IPv6 network interface cannot contain control characters").optional()
 }).superRefine((node, ctx) => {
   if (!(node.protocol === "hysteria2" && node.tlsMode === "self-signed") && !node.domain?.trim()) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["domain"], message: "Domain or endpoint is required" });
@@ -247,6 +297,18 @@ const nodeSchema = z.object({
   }
 });
 
+const monitorNodeSchema = z.object({
+  protocol: monitorProtocolSchema,
+  name: z.string().min(1).max(80),
+  group: z.string().max(80).optional(),
+  domain: z.string().max(253).refine(hasNoControlChars, "Domain cannot contain control characters").optional().default(""),
+  endpoint: z.string().max(512).refine(hasNoControlChars, "Endpoint cannot contain control characters").optional().default(""),
+  listenPort: z.coerce.number().int().min(1).max(65535),
+  service: z.string().max(160).refine(hasNoControlChars, "Service name cannot contain control characters").optional().default(""),
+  serviceProtocol: serviceProtocolSchema.optional(),
+  configPath: z.string().max(512).refine(hasNoControlChars, "Config path cannot contain control characters").optional().default("")
+});
+
 function parseBody(schema, req, res) {
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
@@ -256,11 +318,51 @@ function parseBody(schema, req, res) {
   return parsed.data;
 }
 
+function loginAttemptKey(req) {
+  return req.ip || req.socket?.remoteAddress || "unknown";
+}
+
+function currentLoginWindow(key) {
+  const now = Date.now();
+  const current = loginFailures.get(key);
+  if (!current || now - current.firstAt > LOGIN_WINDOW_MS) {
+    const fresh = { count: 0, firstAt: now };
+    loginFailures.set(key, fresh);
+    return fresh;
+  }
+  return current;
+}
+
+function isLoginRateLimited(req) {
+  const entry = currentLoginWindow(loginAttemptKey(req));
+  return entry.count >= LOGIN_MAX_FAILURES;
+}
+
+function recordLoginFailure(req) {
+  const entry = currentLoginWindow(loginAttemptKey(req));
+  entry.count += 1;
+}
+
+function clearLoginFailures(req) {
+  loginFailures.delete(loginAttemptKey(req));
+}
+
 function normalizeUsers(users) {
   return users.map((user) => ({
     username: user.username.trim(),
     password: user.password
   }));
+}
+
+function defaultServiceProtocol(protocol) {
+  return monitorProtocols[protocol]?.serviceProtocol || "tcp";
+}
+
+function manualMonitorEndpoint(server, node) {
+  const explicit = String(node.endpoint || "").trim();
+  if (explicit) return explicit;
+  const host = String(node.domain || "").trim() || server.host;
+  return `${hostForUrl(host)}:${node.listenPort}`;
 }
 
 async function requireReadyServer(serverId, res) {
@@ -322,13 +424,19 @@ app.post("/api/auth/login", async (req, res) => {
     res.json({ ok: true });
     return;
   }
+  if (isLoginRateLimited(req)) {
+    res.status(429).json({ error: "Too many failed login attempts. Try again later." });
+    return;
+  }
   const data = parseBody(loginSchema, req, res);
   if (!data) return;
   const result = await loginWithPassword(data.password);
   if (!result.ok) {
+    recordLoginFailure(req);
     res.status(401).json({ error: "Invalid password" });
     return;
   }
+  clearLoginFailures(req);
   setSessionCookie(res, result.token, req);
   res.json({ ok: true });
 });
@@ -376,7 +484,8 @@ app.get("/api/bootstrap", async (_req, res) => {
   const state = await loadDb();
   res.json({
     ...publicState(state),
-    providers: providerList()
+    providers: providerList(),
+    monitorProtocols: monitorProtocolList()
   });
 });
 
@@ -394,13 +503,19 @@ app.post("/api/servers", async (req, res) => {
   });
   const data = parseBody(schema, req, res);
   if (!data) return;
+  const state = await loadDb();
+  const existingServer = data.server.id ? state.servers.find((item) => item.id === data.server.id) : null;
+  if (data.server.id && !existingServer) {
+    res.status(404).json({ error: "Server not found for hook reinstall" });
+    return;
+  }
   const token = createHookToken();
   const hookPort = data.server.hookPort || DEFAULT_HOOK_PORT;
   const host = normalizeHost(data.server.host);
   const server = {
     ...data.server,
     host,
-    id: data.server.id || uuid(),
+    id: existingServer?.id || uuid(),
     sshUserHint: data.credential.username,
     hookPort,
     hookUrl: `http://${hostForUrl(host)}:${hookPort}`,
@@ -503,6 +618,18 @@ app.post("/api/servers/:id/reboot", async (req, res) => {
   res.status(202).json({ job });
 });
 
+app.post("/api/servers/:id/hook/upgrade", async (req, res) => {
+  const server = await requireReadyServer(req.params.id, res);
+  if (!server) return;
+  const job = await createJob({
+    type: "hook-upgrade",
+    title: `Upgrade hook on ${server.name}`,
+    payload: { server }
+  });
+  queueMicrotask(() => runHookUpgradeJob(job, { server }));
+  res.status(202).json({ job });
+});
+
 app.post("/api/deployments", async (req, res) => {
   const schema = z.object({
     serverId: z.string(),
@@ -511,6 +638,10 @@ app.post("/api/deployments", async (req, res) => {
   });
   const data = parseBody(schema, req, res);
   if (!data) return;
+  if (data.node.id) {
+    res.status(400).json({ error: "Use the node update endpoint to redeploy an existing node" });
+    return;
+  }
   const state = await loadDb();
   const server = state.servers.find((item) => item.id === data.serverId);
   if (!server) {
@@ -527,7 +658,7 @@ app.post("/api/deployments", async (req, res) => {
     listenPort: data.node.protocol === "trojan" ? 443 : data.node.listenPort,
     tlsMode: data.node.tlsMode === "acme-dns-cloudflare" ? "acme-dns" : data.node.tlsMode,
     dnsProvider: data.node.tlsMode === "acme-dns-cloudflare" ? "cloudflare" : data.node.dnsProvider,
-    id: data.node.id || uuid(),
+    id: uuid(),
     serverId: server.id
   };
   const users = normalizeUsers(data.users);
@@ -541,6 +672,60 @@ app.post("/api/deployments", async (req, res) => {
 
   queueMicrotask(() => runDeployJob(job, { server, node, users: effectiveUsers }));
   res.status(202).json({ job, server: publicServer(server), node });
+});
+
+app.post("/api/nodes/monitors", async (req, res) => {
+  const schema = z.object({
+    serverId: z.string(),
+    node: monitorNodeSchema
+  });
+  const data = parseBody(schema, req, res);
+  if (!data) return;
+  if (isDeployableProtocol(data.node.protocol)) {
+    res.status(400).json({ error: "Deployable protocols should be added from the deployment page" });
+    return;
+  }
+  const state = await loadDb();
+  const server = state.servers.find((item) => item.id === data.serverId);
+  if (!server) {
+    res.status(404).json({ error: "Server not found" });
+    return;
+  }
+  if (server.hookStatus !== "online") {
+    res.status(409).json({ error: "Server hook is not ready" });
+    return;
+  }
+
+  const protocol = monitorProtocols[data.node.protocol];
+  const serviceProtocol = data.node.serviceProtocol || defaultServiceProtocol(data.node.protocol);
+  const timestamp = new Date().toISOString();
+  const node = stamp({
+    ...data.node,
+    id: uuid(),
+    serverId: server.id,
+    endpoint: manualMonitorEndpoint(server, data.node),
+    serviceProtocol,
+    remoteKey: `manual:${data.node.protocol}:${data.node.service || ""}:${data.node.listenPort}:${Date.now()}`,
+    importSource: "manual-monitor",
+    managedBy: "manual",
+    monitorOnly: true,
+    status: "warning",
+    traffic: { tx: 0, rx: 0 },
+    onlineUsers: 0,
+    lastCheckedAt: null,
+    capability: protocol?.capabilities || ["traffic-monitor", "connection-ip", "source-ip-ban"]
+  }, true);
+
+  await mutateDb((db) => {
+    db.nodes = db.nodes || [];
+    db.nodes.push(node);
+    appendAudit(db, "node.monitor.add", `${node.name} monitor registered on ${server.name}`, {
+      serverId: server.id,
+      nodeId: node.id,
+      createdAt: timestamp
+    });
+  });
+  res.status(201).json({ node });
 });
 
 app.patch("/api/nodes/:id", async (req, res) => {
@@ -608,6 +793,17 @@ app.delete("/api/nodes/:id", async (req, res) => {
   const node = state.nodes.find((item) => item.id === req.params.id);
   if (!node) {
     res.status(404).json({ error: "Node not found" });
+    return;
+  }
+  if ((node.monitorOnly || !isDeployableProtocol(node.protocol)) && req.query.force !== "1" && req.query.force !== "true") {
+    await mutateDb((db) => {
+      removeNodeState(db, node.id);
+      appendAudit(db, "node.monitor.remove", `${node.name} monitor removed from local state`, {
+        serverId: node.serverId,
+        nodeId: node.id
+      });
+    });
+    res.json({ ok: true, monitorOnly: true });
     return;
   }
   if (req.query.force === "1" || req.query.force === "true") {
@@ -694,6 +890,10 @@ app.post("/api/hooks/status", async (req, res) => {
     res.status(404).json({ error: "Server or node not found" });
     return;
   }
+  if (node.serverId !== server.id) {
+    res.status(409).json({ error: "Node does not belong to the selected server" });
+    return;
+  }
   if (server.hookStatus !== "online") {
     res.status(409).json({ error: "Server hook is not ready" });
     return;
@@ -720,6 +920,10 @@ app.post("/api/hooks/service", async (req, res) => {
   const node = state.nodes.find((item) => item.id === data.nodeId);
   if (!server || !node) {
     res.status(404).json({ error: "Server or node not found" });
+    return;
+  }
+  if (node.serverId !== server.id) {
+    res.status(409).json({ error: "Node does not belong to the selected server" });
     return;
   }
   if (server.hookStatus !== "online") {
@@ -804,6 +1008,27 @@ app.post("/api/hooks/ipquality", async (req, res) => {
   res.status(202).json({ job });
 });
 
+app.post("/api/hooks/exec", async (req, res) => {
+  const data = parseBody(terminalCommandSchema, req, res);
+  if (!data) return;
+  const server = await requireReadyServer(data.serverId, res);
+  if (!server) return;
+
+  const job = await runServerAction({
+    type: "exec",
+    title: `Terminal ${server.name}`,
+    server,
+    extra: {
+      SIMPLEUI_EXEC_COMMAND: data.command,
+      SIMPLEUI_EXEC_CWD: data.cwd?.trim() || "/root",
+      SIMPLEUI_EXEC_TIMEOUT: String(data.timeoutSeconds),
+      SIMPLEUI_EXEC_OUTPUT_LIMIT: "200000"
+    },
+    timeoutMs: (data.timeoutSeconds * 1000) + 15_000
+  });
+  res.status(202).json({ job });
+});
+
 app.post("/api/hooks/ban", async (req, res) => {
   const schema = z.object({
     targetIp: z.string().min(1),
@@ -818,9 +1043,14 @@ app.post("/api/hooks/ban", async (req, res) => {
   }
   data.targetIp = normalizedTarget.value;
   const state = await loadDb();
-  const nodes = state.nodes.filter((node) => data.nodeIds.includes(node.id));
+  const requestedNodeIds = Array.from(new Set(data.nodeIds));
+  const nodes = state.nodes.filter((node) => requestedNodeIds.includes(node.id));
   if (!nodes.length) {
     res.status(404).json({ error: "No nodes selected" });
+    return;
+  }
+  if (nodes.length !== requestedNodeIds.length) {
+    res.status(404).json({ error: "One or more selected nodes were not found" });
     return;
   }
 
@@ -852,10 +1082,10 @@ app.post("/api/hooks/ban", async (req, res) => {
       targetKind: "source-ip",
       target: data.targetIp,
       ipFamily: normalizedTarget.family,
-      nodeIds: data.nodeIds,
+      nodeIds: requestedNodeIds,
       status: "active"
     }, true));
-    appendAudit(db, "ban.create", `Block source IP ${data.targetIp} on ${data.nodeIds.length} node(s)`);
+    appendAudit(db, "ban.create", `Block source IP ${data.targetIp} on ${requestedNodeIds.length} node(s)`);
   });
   res.status(202).json({ jobs });
 });

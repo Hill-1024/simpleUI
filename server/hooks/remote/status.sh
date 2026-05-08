@@ -1,18 +1,55 @@
 protocol="${SIMPLEUI_PROTOCOL:-hysteria2}"
 port="${SIMPLEUI_PORT:-443}"
-service="hysteria-server.service"
-service_proto="udp"
-if [ "$protocol" = "trojan" ]; then
-  service="trojan.service"
-  service_proto="tcp"
-fi
+service="${SIMPLEUI_SERVICE:-}"
+service_proto="${SIMPLEUI_SERVICE_PROTO:-}"
 
-active="$(systemctl is-active "$service" 2>/dev/null || true)"
+default_service_for_protocol() {
+  case "$1" in
+    hysteria2) printf 'hysteria-server.service' ;;
+    trojan) printf 'trojan.service' ;;
+    *) printf '' ;;
+  esac
+}
+
+default_proto_for_protocol() {
+  case "$1" in
+    hysteria2|hysteria|tuic|wireguard) printf 'udp' ;;
+    shadowsocks|naive) printf 'tcp,udp' ;;
+    *) printf 'tcp' ;;
+  esac
+}
+
+normalize_service_protocols() {
+  local raw="${1:-}"
+  if [ -z "$raw" ]; then
+    raw="$(default_proto_for_protocol "$protocol")"
+  fi
+  printf '%s' "$raw" | tr '/ ' ',,' | awk -F, '
+    {
+      for (i = 1; i <= NF; i++) {
+        if (($i == "tcp" || $i == "udp") && !seen[$i]++) out = out ? out "," $i : $i
+      }
+    }
+    END { print out ? out : "tcp" }
+  '
+}
+
+if [ -z "$service" ]; then
+  service="$(default_service_for_protocol "$protocol")"
+fi
+service_proto="$(normalize_service_protocols "$service_proto")"
+
+active="unknown"
+if [ -n "$service" ]; then
+  active="$(systemctl is-active "$service" 2>/dev/null || true)"
+fi
 version=""
 if [ "$protocol" = "hysteria2" ] && command -v hysteria >/dev/null 2>&1; then
   version="$(hysteria version 2>/dev/null | head -n 1 || true)"
 elif [ "$protocol" = "trojan" ] && [ -x /usr/src/trojan/trojan ]; then
   version="$(/usr/src/trojan/trojan --version 2>/dev/null | head -n 1 || true)"
+elif printf '%s' "$service" | grep -qi 'sing-box' && command -v sing-box >/dev/null 2>&1; then
+  version="$(sing-box version 2>/dev/null | head -n 1 || true)"
 fi
 
 traffic="{}"
@@ -65,6 +102,7 @@ ensure_nft_rule() {
 ensure_nft_traffic_accounting() {
   command -v nft >/dev/null 2>&1 || return 1
   local prefix="$1"
+  local protocols="$2"
   local rx4="${prefix}_rx4"
   local tx4="${prefix}_tx4"
   local rx6="${prefix}_rx6"
@@ -76,15 +114,18 @@ ensure_nft_traffic_accounting() {
   nft "add set inet simpleui_traffic ${tx4} { type ipv4_addr; flags dynamic; counter; }" >/dev/null 2>&1 || true
   nft "add set inet simpleui_traffic ${rx6} { type ipv6_addr; flags dynamic; counter; }" >/dev/null 2>&1 || true
   nft "add set inet simpleui_traffic ${tx6} { type ipv6_addr; flags dynamic; counter; }" >/dev/null 2>&1 || true
-  ensure_nft_rule input "dport ${port} update @${rx4}" "add rule inet simpleui_traffic input meta nfproto ipv4 ${service_proto} dport ${port} update @${rx4} { ip saddr counter }"
-  ensure_nft_rule output "sport ${port} update @${tx4}" "add rule inet simpleui_traffic output meta nfproto ipv4 ${service_proto} sport ${port} update @${tx4} { ip daddr counter }"
-  ensure_nft_rule input "dport ${port} update @${rx6}" "add rule inet simpleui_traffic input meta nfproto ipv6 ${service_proto} dport ${port} update @${rx6} { ip6 saddr counter }"
-  ensure_nft_rule output "sport ${port} update @${tx6}" "add rule inet simpleui_traffic output meta nfproto ipv6 ${service_proto} sport ${port} update @${tx6} { ip6 daddr counter }"
+  printf '%s' "$protocols" | tr ',' '\n' | while IFS= read -r proto; do
+    [ "$proto" = "tcp" ] || [ "$proto" = "udp" ] || continue
+    ensure_nft_rule input "${proto} dport ${port} update @${rx4}" "add rule inet simpleui_traffic input meta nfproto ipv4 ${proto} dport ${port} update @${rx4} { ip saddr counter }"
+    ensure_nft_rule output "${proto} sport ${port} update @${tx4}" "add rule inet simpleui_traffic output meta nfproto ipv4 ${proto} sport ${port} update @${tx4} { ip daddr counter }"
+    ensure_nft_rule input "${proto} dport ${port} update @${rx6}" "add rule inet simpleui_traffic input meta nfproto ipv6 ${proto} dport ${port} update @${rx6} { ip6 saddr counter }"
+    ensure_nft_rule output "${proto} sport ${port} update @${tx6}" "add rule inet simpleui_traffic output meta nfproto ipv6 ${proto} sport ${port} update @${tx6} { ip6 daddr counter }"
+  done
 }
 
 enable_conntrack_accounting
 nft_prefix="$(traffic_prefix)"
-ensure_nft_traffic_accounting "$nft_prefix" || true
+ensure_nft_traffic_accounting "$nft_prefix" "$service_proto" || true
 socket_lines="$(ss -Htunp 2>/dev/null | tail -n 300 | sed 's/"/\\"/g' || true)"
 conntrack_lines="$(read_conntrack_lines || true)"
 local_ips="$(ip -o addr show 2>/dev/null | awk '{split($4, a, "/"); if (a[1] != "") print a[1]}' | paste -sd, -)"
@@ -97,6 +138,7 @@ import json
 import sys
 
 protocol, service, service_proto, active, version, traffic_raw, online_raw, streams_raw, interfaces_raw, socket_raw, conntrack_raw, local_ips_raw, nft_json_raw, nft_prefix, port = sys.argv[1:16]
+service_proto_label = "/".join([item for item in service_proto.split(",") if item]) or "tcp"
 
 def parse(raw, fallback):
     try:
@@ -362,7 +404,7 @@ def compact_client_connections(rows):
     for item in bucket.values():
         protocols = sorted(item.pop("protocols"))
         item["protocols"] = protocols
-        item["protocol"] = "/".join(protocols) if protocols else service_proto
+        item["protocol"] = "/".join(protocols) if protocols else service_proto_label
         item["state"] = item["state"] or "active"
         compacted.append(item)
     compacted.sort(key=lambda item: (item["rx"] + item["tx"], item["connections"]), reverse=True)
@@ -370,7 +412,7 @@ def compact_client_connections(rows):
 
 connections = compact_client_connections(connections)
 
-remote_traffic = nft_remote_traffic(nft_json_raw, nft_prefix, service_proto)
+remote_traffic = nft_remote_traffic(nft_json_raw, nft_prefix, service_proto_label)
 conntrack_traffic = conntrack_remote_traffic(conntrack_raw, port)
 for remote_ip, item in conntrack_traffic.items():
     existing = remote_traffic.setdefault(remote_ip, {
@@ -421,6 +463,7 @@ remote_traffic_list.sort(key=lambda item: item["total"], reverse=True)
 payload = {
     "protocol": protocol,
     "service": service,
+    "serviceProtocol": service_proto,
     "active": active,
     "version": version,
     "traffic": parse(traffic_raw, {}),

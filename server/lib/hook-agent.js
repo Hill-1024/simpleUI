@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { isIP } from "node:net";
+import { Buffer } from "node:buffer";
 import { readHookScript } from "./providers.js";
 import { runSshScript } from "./ssh.js";
 
@@ -13,6 +14,8 @@ const hookNames = [
   "server-reboot.sh",
   "status.sh",
   "service.sh",
+  "exec.sh",
+  "agent-upgrade.sh",
   "ban.sh",
   "optimize.sh",
   "ipquality.sh",
@@ -25,10 +28,12 @@ function heredoc(path, content) {
 
 function agentPython() {
   return String.raw`#!/usr/bin/env python3
+import hmac
 import json
 import os
 import socket
 import subprocess
+import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = "/opt/simpleui-hook"
@@ -36,12 +41,15 @@ HOOK_DIR = os.path.join(ROOT, "hooks")
 TOKEN = os.environ.get("SIMPLEUI_HOOK_TOKEN", "")
 PORT = int(os.environ.get("SIMPLEUI_HOOK_PORT", "37877"))
 BIND = os.environ.get("SIMPLEUI_HOOK_BIND", "0.0.0.0")
+MAX_BODY_BYTES = 4 * 1024 * 1024
 ALLOWED = {
     "deploy": {"hysteria2": "hysteria2-deploy.sh", "trojan": "trojan-deploy.sh"},
     "server-status": "server-status.sh",
     "server-reboot": "server-reboot.sh",
     "status": "status.sh",
     "service": "service.sh",
+    "exec": "exec.sh",
+    "upgrade-agent": "agent-upgrade.sh",
     "ban": "ban.sh",
     "optimize": "optimize.sh",
     "ipquality": "ipquality.sh",
@@ -64,13 +72,15 @@ def authorized(handler):
     token = handler.headers.get("X-SimpleUI-Token", "")
     if header.startswith("Bearer "):
         token = header[7:]
-    return bool(TOKEN) and token == TOKEN
+    return bool(TOKEN) and hmac.compare_digest(token, TOKEN)
 
 
 def parse_body(handler):
     length = int(handler.headers.get("Content-Length", "0") or "0")
     if not length:
         return {}
+    if length > MAX_BODY_BYTES:
+        raise ValueError("request body too large")
     raw = handler.rfile.read(length)
     return json.loads(raw.decode("utf-8"))
 
@@ -88,28 +98,50 @@ def selected_hook(action, env):
     return item
 
 
-def run_hook(action, env):
+def run_hook(action, env, payload=None):
+    if not isinstance(env, dict):
+        raise ValueError("env must be an object")
+    if payload is not None and not isinstance(payload, dict):
+        raise ValueError("payload must be an object")
     safe_env = os.environ.copy()
     for key, value in (env or {}).items():
-        if key.startswith("SIMPLEUI_") and value is not None:
+        if isinstance(key, str) and key.startswith("SIMPLEUI_") and value is not None:
             safe_env[key] = str(value)
 
-    hook_name = selected_hook(action, safe_env)
-    with open(os.path.join(HOOK_DIR, "common.sh"), "r", encoding="utf-8") as handle:
-        common = handle.read()
-    with open(os.path.join(HOOK_DIR, hook_name), "r", encoding="utf-8") as handle:
-        script = handle.read()
+    temp_paths = []
+    try:
+        if action == "upgrade-agent" and payload:
+            bundle_b64 = payload.get("bundleB64")
+            if bundle_b64:
+                fd, path = tempfile.mkstemp(prefix="simpleui-upgrade-", suffix=".b64")
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    handle.write(str(bundle_b64))
+                os.chmod(path, 0o600)
+                safe_env["SIMPLEUI_UPGRADE_BUNDLE_FILE"] = path
+                temp_paths.append(path)
 
-    proc = subprocess.run(
-        ["bash", "-se"],
-        input=common + "\n\n" + script + "\n",
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        env=safe_env,
-        timeout=3600 if action == "optimize" else (1800 if action in ("deploy", "ipquality") else 180),
-    )
-    return {"code": proc.returncode, "output": proc.stdout}
+        hook_name = selected_hook(action, safe_env)
+        with open(os.path.join(HOOK_DIR, "common.sh"), "r", encoding="utf-8") as handle:
+            common = handle.read()
+        with open(os.path.join(HOOK_DIR, hook_name), "r", encoding="utf-8") as handle:
+            script = handle.read()
+
+        proc = subprocess.run(
+            ["bash", "-se"],
+            input=common + "\n\n" + script + "\n",
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            env=safe_env,
+            timeout=3600 if action == "optimize" else (1800 if action in ("deploy", "ipquality") else 180),
+        )
+        return {"code": proc.returncode, "output": proc.stdout}
+    finally:
+        for path in temp_paths:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -138,7 +170,8 @@ class Handler(BaseHTTPRequestHandler):
             payload = parse_body(self)
             action = payload.get("action", "")
             env = payload.get("env", {})
-            result = run_hook(action, env)
+            extra_payload = payload.get("payload", {})
+            result = run_hook(action, env, extra_payload)
             ok = result["code"] == 0
             response(self, 200 if ok else 500, {"ok": ok, **result})
         except Exception as exc:
@@ -166,6 +199,17 @@ if __name__ == "__main__":
 
 export function createHookToken() {
   return randomBytes(32).toString("hex");
+}
+
+export async function buildHookUpgradeBundleB64() {
+  const hooks = [];
+  for (const name of hookNames) {
+    hooks.push({ name, content: await readHookScript(name) });
+  }
+  return Buffer.from(JSON.stringify({
+    agent: agentPython(),
+    hooks
+  }), "utf8").toString("base64");
 }
 
 export async function buildInstallAgentScript() {
@@ -240,27 +284,29 @@ export async function installHookAgent({ server, credential, token, hookPort, on
   });
 }
 
-export async function callHookAgent({ server, action, env, timeoutMs = 180_000 }) {
+export async function callHookAgent({ server, action, env, payload, timeoutMs = 180_000 }) {
   if (!server.hookUrl || !server.hookToken) {
     throw new Error("Server hook is not installed");
   }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    const body = { action, env };
+    if (payload !== undefined) body.payload = payload;
     const response = await fetch(`${server.hookUrl.replace(/\/$/, "")}/run`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${server.hookToken}`
       },
-      body: JSON.stringify({ action, env }),
+      body: JSON.stringify(body),
       signal: controller.signal
     });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || payload.ok === false) {
-      throw new Error(payload.error || payload.output || `Hook agent returned ${response.status}`);
+    const responsePayload = await response.json().catch(() => ({}));
+    if (!response.ok || responsePayload.ok === false) {
+      throw new Error(responsePayload.error || responsePayload.output || `Hook agent returned ${response.status}`);
     }
-    return payload;
+    return responsePayload;
   } finally {
     clearTimeout(timer);
   }

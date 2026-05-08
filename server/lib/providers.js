@@ -5,10 +5,128 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const hookDir = path.resolve(__dirname, "../hooks/remote");
 
+export const DEPLOYABLE_PROTOCOLS = ["hysteria2", "trojan"];
+
+export const monitorProtocols = {
+  hysteria2: {
+    id: "hysteria2",
+    name: "Hysteria2",
+    serviceProtocol: "udp",
+    deployable: true,
+    autoDiscover: ["simpleui", "sing-box"],
+    capabilities: ["traffic-monitor", "connection-ip", "source-ip-ban", "service-control"]
+  },
+  trojan: {
+    id: "trojan",
+    name: "Trojan",
+    serviceProtocol: "tcp",
+    deployable: true,
+    autoDiscover: ["simpleui", "sing-box"],
+    capabilities: ["traffic-monitor", "connection-ip", "source-ip-ban", "service-control"]
+  },
+  shadowsocks: {
+    id: "shadowsocks",
+    name: "Shadowsocks",
+    serviceProtocol: "tcp,udp",
+    deployable: false,
+    autoDiscover: ["sing-box"],
+    capabilities: ["traffic-monitor", "connection-ip", "source-ip-ban", "service-control"]
+  },
+  vmess: {
+    id: "vmess",
+    name: "VMess",
+    serviceProtocol: "tcp",
+    deployable: false,
+    autoDiscover: ["sing-box"],
+    capabilities: ["traffic-monitor", "connection-ip", "source-ip-ban", "service-control"]
+  },
+  vless: {
+    id: "vless",
+    name: "VLESS",
+    serviceProtocol: "tcp",
+    deployable: false,
+    autoDiscover: ["sing-box"],
+    capabilities: ["traffic-monitor", "connection-ip", "source-ip-ban", "service-control"]
+  },
+  naive: {
+    id: "naive",
+    name: "Naive",
+    serviceProtocol: "tcp,udp",
+    deployable: false,
+    autoDiscover: ["sing-box"],
+    capabilities: ["traffic-monitor", "connection-ip", "source-ip-ban", "service-control"]
+  },
+  hysteria: {
+    id: "hysteria",
+    name: "Hysteria",
+    serviceProtocol: "udp",
+    deployable: false,
+    autoDiscover: ["sing-box"],
+    capabilities: ["traffic-monitor", "connection-ip", "source-ip-ban", "service-control"]
+  },
+  shadowtls: {
+    id: "shadowtls",
+    name: "ShadowTLS",
+    serviceProtocol: "tcp",
+    deployable: false,
+    autoDiscover: ["sing-box"],
+    capabilities: ["traffic-monitor", "connection-ip", "source-ip-ban", "service-control"]
+  },
+  tuic: {
+    id: "tuic",
+    name: "TUIC",
+    serviceProtocol: "udp",
+    deployable: false,
+    autoDiscover: ["sing-box"],
+    capabilities: ["traffic-monitor", "connection-ip", "source-ip-ban", "service-control"]
+  },
+  anytls: {
+    id: "anytls",
+    name: "AnyTLS",
+    serviceProtocol: "tcp",
+    deployable: false,
+    autoDiscover: ["sing-box"],
+    capabilities: ["traffic-monitor", "connection-ip", "source-ip-ban", "service-control"]
+  },
+  wireguard: {
+    id: "wireguard",
+    name: "WireGuard",
+    serviceProtocol: "udp",
+    deployable: false,
+    autoDiscover: ["sing-box-endpoint"],
+    capabilities: ["traffic-monitor", "connection-ip", "source-ip-ban", "service-control"]
+  },
+  socks: {
+    id: "socks",
+    name: "SOCKS",
+    serviceProtocol: "tcp",
+    deployable: false,
+    autoDiscover: ["sing-box"],
+    capabilities: ["traffic-monitor", "connection-ip", "source-ip-ban", "service-control"]
+  },
+  http: {
+    id: "http",
+    name: "HTTP",
+    serviceProtocol: "tcp",
+    deployable: false,
+    autoDiscover: ["sing-box"],
+    capabilities: ["traffic-monitor", "connection-ip", "source-ip-ban", "service-control"]
+  },
+  mixed: {
+    id: "mixed",
+    name: "Mixed",
+    serviceProtocol: "tcp",
+    deployable: false,
+    autoDiscover: ["sing-box"],
+    capabilities: ["traffic-monitor", "connection-ip", "source-ip-ban", "service-control"]
+  }
+};
+
 export const providers = {
   hysteria2: {
     id: "hysteria2",
     name: "Hysteria2",
+    deployable: true,
     upstream: "https://github.com/seagullz4/hysteria2",
     branch: "main",
     installMode: "python",
@@ -46,6 +164,7 @@ export const providers = {
   trojan: {
     id: "trojan",
     name: "Trojan",
+    deployable: true,
     upstream: "https://github.com/xyz690/Trojan",
     branch: "master",
     installMode: "shell",
@@ -74,7 +193,19 @@ export const providers = {
 };
 
 export function providerList() {
-  return Object.values(providers);
+  return DEPLOYABLE_PROTOCOLS.map((id) => providers[id]).filter(Boolean);
+}
+
+export function monitorProtocolList() {
+  return Object.values(monitorProtocols);
+}
+
+export function monitorProtocolIds() {
+  return Object.keys(monitorProtocols);
+}
+
+export function isDeployableProtocol(protocol) {
+  return DEPLOYABLE_PROTOCOLS.includes(protocol);
 }
 
 export async function readHookScript(name) {

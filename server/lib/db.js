@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { v4 as uuid } from "uuid";
+import { sanitizeNodeSecrets } from "./security.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "../..");
@@ -94,7 +95,7 @@ export function stamp(entity, isNew = false) {
 export function publicState(state) {
   return {
     servers: (state.servers || []).map(publicServer),
-    nodes: state.nodes || [],
+    nodes: (state.nodes || []).map(sanitizeNodeSecrets),
     users: state.users || [],
     connections: state.connections || [],
     remoteTraffic: state.remoteTraffic || [],

@@ -2,8 +2,9 @@ import { EventEmitter } from "node:events";
 import { isIP } from "node:net";
 import { v4 as uuid } from "uuid";
 import { appendAudit, mutateDb, stamp } from "./db.js";
-import { callHookAgent, checkHookHealth, installHookAgent } from "./hook-agent.js";
-import { providers } from "./providers.js";
+import { buildHookUpgradeBundleB64, callHookAgent, checkHookHealth, installHookAgent } from "./hook-agent.js";
+import { isDeployableProtocol, monitorProtocols, providers } from "./providers.js";
+import { collectNodeSecrets, sanitizeNodeSecrets } from "./security.js";
 
 const streams = new Map();
 
@@ -49,6 +50,10 @@ function nodeEnv({ node, users, action, extra = {} }) {
   return {
     SIMPLEUI_ACTION: action,
     SIMPLEUI_PROTOCOL: node.protocol,
+    SIMPLEUI_SERVICE: node.service,
+    SIMPLEUI_SERVICE_PROTO: node.serviceProtocol,
+    SIMPLEUI_CONFIG: node.configPath,
+    SIMPLEUI_MONITOR_ONLY: node.monitorOnly ? "1" : "0",
     SIMPLEUI_NODE_NAME: node.name,
     SIMPLEUI_DOMAIN: node.domain,
     SIMPLEUI_PORT: node.listenPort || node.port || 443,
@@ -90,6 +95,7 @@ function serverEnv({ action, extra = {} }) {
 function parseMarker(output, marker) {
   const line = output
     .split(/\r?\n/)
+    .reverse()
     .find((item) => item.startsWith(marker));
   if (!line) return null;
   try {
@@ -97,6 +103,31 @@ function parseMarker(output, marker) {
   } catch {
     return null;
   }
+}
+
+function parseMarkerPayloads(output = "", marker) {
+  return output
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith(marker))
+    .map((line) => {
+      try {
+        return JSON.parse(line.slice(marker.length));
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
+
+function removeLastMarkerLine(output = "", marker) {
+  const lines = output.split(/\r?\n/);
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if (lines[index].startsWith(marker)) {
+      lines.splice(index, 1);
+      break;
+    }
+  }
+  return lines.join("\n");
 }
 
 function stripMarker(output = "", markers = []) {
@@ -107,6 +138,193 @@ function stripMarker(output = "", markers = []) {
     clean = clean.replace(new RegExp(`(^|\\r?\\n)${escaped}[^\\r\\n]*(?=\\r?\\n|$)`, "g"), "$1");
   }
   return clean.replace(/\n?$/, "\n");
+}
+
+function shQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+async function callRemoteExec(server, command, { timeoutSeconds = 60, outputLimit = 200000 } = {}) {
+  const result = await callHookAgent({
+    server,
+    action: "exec",
+    env: serverEnv({
+      action: "exec",
+      extra: {
+        SIMPLEUI_EXEC_COMMAND: command,
+        SIMPLEUI_EXEC_CWD: "/root",
+        SIMPLEUI_EXEC_TIMEOUT: String(timeoutSeconds),
+        SIMPLEUI_EXEC_OUTPUT_LIMIT: String(outputLimit)
+      }
+    }),
+    timeoutMs: timeoutSeconds * 1000 + 15_000
+  });
+  const parsed = parseMarker(result.output || "", "__SIMPLEUI_RESULT__");
+  if (!parsed?.ok) {
+    const cleanOutput = stripMarker(result.output || "", ["__SIMPLEUI_RESULT__"]).trim();
+    const suffix = parsed?.exitCode ? ` (exit ${parsed.exitCode})` : "";
+    throw new Error(parsed?.error || cleanOutput || `Remote exec failed${suffix}`);
+  }
+  return { result, parsed };
+}
+
+function hookUpgradeFromBundleFileCommand(remotePath) {
+  const script = String.raw`import base64
+import json
+import os
+import subprocess
+import sys
+import tempfile
+
+ROOT = "/opt/simpleui-hook"
+HOOK_DIR = os.path.join(ROOT, "hooks")
+bundle_path = sys.argv[1]
+
+def emit(payload):
+    print("__SIMPLEUI_RESULT__" + json.dumps(payload, ensure_ascii=False))
+
+try:
+    with open(bundle_path, "r", encoding="utf-8") as handle:
+        bundle_b64 = handle.read().strip()
+except OSError as exc:
+    print(f"[simpleui] Unable to read hook upgrade bundle file: {exc}")
+    emit({"ok": False, "error": "Unable to read hook upgrade bundle file"})
+    raise SystemExit(0)
+
+if not bundle_b64:
+    print("[simpleui] Missing hook upgrade bundle.")
+    emit({"ok": False, "error": "Missing hook upgrade bundle"})
+    raise SystemExit(0)
+
+try:
+    bundle = json.loads(base64.b64decode(bundle_b64).decode("utf-8"))
+except Exception as exc:
+    print(f"[simpleui] Invalid hook upgrade bundle: {exc}")
+    emit({"ok": False, "error": "Invalid hook upgrade bundle"})
+    raise SystemExit(0)
+
+agent = bundle.get("agent")
+hooks = bundle.get("hooks") or []
+if not isinstance(agent, str) or not agent:
+    print("[simpleui] Upgrade bundle does not contain agent.py.")
+    emit({"ok": False, "error": "Missing agent"})
+    raise SystemExit(0)
+if not isinstance(hooks, list) or not hooks:
+    print("[simpleui] Upgrade bundle does not contain hook scripts.")
+    emit({"ok": False, "error": "Missing hooks"})
+    raise SystemExit(0)
+
+os.makedirs(HOOK_DIR, mode=0o700, exist_ok=True)
+
+def atomic_write(path, content, mode):
+    directory = os.path.dirname(path)
+    fd, tmp = tempfile.mkstemp(prefix=".simpleui-", dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(content)
+            if not content.endswith("\n"):
+                handle.write("\n")
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+atomic_write(os.path.join(ROOT, "agent.py"), agent, 0o700)
+written = []
+for item in hooks:
+    name = item.get("name") if isinstance(item, dict) else None
+    content = item.get("content") if isinstance(item, dict) else None
+    if not isinstance(name, str) or "/" in name or not name.endswith(".sh"):
+        raise ValueError(f"invalid hook script name: {name!r}")
+    if not isinstance(content, str):
+        raise ValueError(f"invalid hook script content: {name}")
+    atomic_write(os.path.join(HOOK_DIR, name), content, 0o700)
+    written.append(name)
+
+try:
+    os.unlink(bundle_path)
+except OSError:
+    pass
+
+subprocess.run(["systemctl", "daemon-reload"], check=False)
+subprocess.Popen(
+    ["sh", "-c", "sleep 1; systemctl restart simpleui-hook.service >/dev/null 2>&1"],
+    stdin=subprocess.DEVNULL,
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+    start_new_session=True,
+)
+
+emit({
+    "ok": True,
+    "service": "simpleui-hook.service",
+    "hooks": written,
+    "restartScheduled": True,
+    "transport": "exec-chunked",
+})`;
+  return `python3 - ${shQuote(remotePath)} <<'PY'\n${script}\nPY`;
+}
+
+function shouldFallbackHookUpgrade(error) {
+  const message = String(error?.message || "");
+  if (/unauthorized|hook is not installed/i.test(message)) return false;
+  return /Missing hook upgrade bundle|request body too large|Argument list too long|unsupported action/i.test(message);
+}
+
+async function upgradeHookViaChunkedExec({ server, bundle, jobId, secrets }) {
+  const remotePath = `/tmp/simpleui-upgrade-${uuid()}.b64`;
+  const chunkSize = 48 * 1024;
+  const totalChunks = Math.max(1, Math.ceil(bundle.length / chunkSize));
+
+  await logJob(jobId, `Switching to chunked hook upgrade transport (${totalChunks} chunks).\n`, secrets);
+  try {
+    await callRemoteExec(server, `umask 077 && : > ${shQuote(remotePath)}`, {
+      timeoutSeconds: 30,
+      outputLimit: 4096
+    });
+
+    for (let offset = 0, index = 0; offset < bundle.length; offset += chunkSize, index += 1) {
+      const chunk = bundle.slice(offset, offset + chunkSize);
+      await callRemoteExec(
+        server,
+        `cat >> ${shQuote(remotePath)} <<'__SIMPLEUI_UPGRADE_CHUNK__'\n${chunk}\n__SIMPLEUI_UPGRADE_CHUNK__`,
+        { timeoutSeconds: 30, outputLimit: 4096 }
+      );
+      const chunkNumber = index + 1;
+      if (chunkNumber === 1 || chunkNumber === totalChunks || chunkNumber % 10 === 0) {
+        await logJob(jobId, `Uploaded hook upgrade chunk ${chunkNumber}/${totalChunks}.\n`, secrets);
+      }
+    }
+
+    const { result } = await callRemoteExec(server, hookUpgradeFromBundleFileCommand(remotePath), {
+      timeoutSeconds: 120,
+      outputLimit: 200000
+    });
+    const payloads = parseMarkerPayloads(result.output || "", "__SIMPLEUI_RESULT__");
+    const upgradePayload = payloads.length > 1 ? payloads[payloads.length - 2] : payloads[0];
+    if (upgradePayload?.ok === false) {
+      throw new Error(upgradePayload.error || "Remote upgrade command rejected bundle");
+    }
+    return {
+      ...result,
+      output: removeLastMarkerLine(result.output || "", "__SIMPLEUI_RESULT__")
+    };
+  } catch (error) {
+    throw new Error(`Chunked hook upgrade failed: ${error.message}`);
+  } finally {
+    try {
+      await callRemoteExec(server, `rm -f ${shQuote(remotePath)}`, {
+        timeoutSeconds: 15,
+        outputLimit: 4096
+      });
+    } catch {
+      // Best-effort cleanup; the upgrade command also removes the file on success.
+    }
+  }
 }
 
 function sumTraffic(traffic = {}) {
@@ -144,6 +362,147 @@ function normalizeAddressHost(host) {
 function formatEndpointHost(host) {
   const clean = normalizeAddressHost(host);
   return isIP(clean) === 6 ? `[${clean}]` : clean;
+}
+
+function cleanText(value, fallback = "") {
+  return String(value ?? fallback).trim();
+}
+
+function optionalNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : undefined;
+}
+
+function discoveryEndpoint(server, discovered, listenPort) {
+  const explicit = cleanText(discovered.endpoint);
+  if (explicit) return explicit;
+  const host = cleanText(discovered.connectHost) || cleanText(discovered.domain) || server.host;
+  return `${formatEndpointHost(host)}:${listenPort || 443}`;
+}
+
+function discoveredUsernames(users = []) {
+  const names = new Set();
+  for (const item of Array.isArray(users) ? users : []) {
+    const username = typeof item === "string" ? item : item?.username;
+    const clean = cleanText(username);
+    if (clean) names.add(clean);
+  }
+  return Array.from(names);
+}
+
+function discoveredRemoteKey(discovered, listenPort) {
+  const explicit = cleanText(discovered.remoteKey);
+  if (explicit) return explicit;
+  return `${discovered.protocol}:${cleanText(discovered.configPath) || "managed"}:${listenPort || ""}`;
+}
+
+function findExistingDiscoveredNode(nodes, serverId, discovered, listenPort, remoteKey) {
+  return nodes.find((node) => node.serverId === serverId && node.remoteKey === remoteKey)
+    || nodes.find((node) =>
+      node.serverId === serverId &&
+      node.protocol === discovered.protocol &&
+      Number(node.listenPort || node.port || 443) === Number(listenPort || 443)
+    );
+}
+
+export function mergeDiscoveredNodes(state, server, discoveredNodes = [], { timestamp = new Date().toISOString(), jobId, audit = false } = {}) {
+  state.nodes = state.nodes || [];
+  state.users = state.users || [];
+
+  const summary = { imported: 0, updated: 0, users: 0 };
+  for (const discovered of Array.isArray(discoveredNodes) ? discoveredNodes : []) {
+    if (!monitorProtocols[discovered?.protocol]) continue;
+    const listenPort = optionalNumber(discovered.listenPort ?? discovered.port) || 443;
+    const remoteKey = discoveredRemoteKey(discovered, listenPort);
+    const existing = findExistingDiscoveredNode(state.nodes, server.id, discovered, listenPort, remoteKey);
+    const provider = providers[discovered.protocol] || monitorProtocols[discovered.protocol];
+    const isNew = !existing;
+    const discoveredName = cleanText(discovered.name) || provider?.name || discovered.protocol;
+    const active = cleanText(discovered.active);
+    const managedBy = cleanText(discovered.managedBy)
+      || (cleanText(discovered.managedEnvPath) ? "simpleui" : cleanText(existing?.managedBy));
+    const monitorOnly = Boolean(discovered.monitorOnly || existing?.monitorOnly || managedBy !== "simpleui" || !isDeployableProtocol(discovered.protocol));
+    const tlsMode = cleanText(discovered.tlsMode)
+      || existing?.tlsMode
+      || (discovered.protocol === "trojan" ? "acme-http" : "acme-http");
+    const jumpPortStart = optionalNumber(discovered.jumpPortStart);
+    const jumpPortEnd = optionalNumber(discovered.jumpPortEnd);
+    const portHoppingEnabled = Boolean(discovered.portHoppingEnabled || (jumpPortStart && jumpPortEnd));
+    const nextNode = stamp(sanitizeNodeSecrets({
+      ...(existing || {}),
+      protocol: discovered.protocol,
+      serverId: server.id,
+      name: existing?.name || `${discoveredName} ${server.name}`,
+      group: existing?.group || "",
+      remoteKey,
+      importSource: cleanText(discovered.importSource) || existing?.importSource || "remote-discovery",
+      managedBy,
+      monitorOnly,
+      remoteDiscoveredAt: timestamp,
+      service: cleanText(discovered.service) || existing?.service,
+      serviceProtocol: cleanText(discovered.serviceProtocol) || existing?.serviceProtocol || monitorProtocols[discovered.protocol]?.serviceProtocol || "tcp",
+      configPath: cleanText(discovered.configPath) || existing?.configPath,
+      domain: cleanText(discovered.domain) || existing?.domain || "",
+      endpoint: discoveryEndpoint(server, discovered, listenPort),
+      listenPort,
+      tlsMode,
+      selfSignedHost: cleanText(discovered.selfSignedHost) || existing?.selfSignedHost || "",
+      certPath: cleanText(discovered.certPath) || existing?.certPath || "",
+      keyPath: cleanText(discovered.keyPath) || existing?.keyPath || "",
+      masqueradeUrl: existing?.masqueradeUrl || "https://www.bing.com/",
+      portHoppingEnabled,
+      jumpPortStart: jumpPortStart || existing?.jumpPortStart,
+      jumpPortEnd: jumpPortEnd || existing?.jumpPortEnd,
+      jumpPortInterface: cleanText(discovered.jumpPortInterface) || existing?.jumpPortInterface || "",
+      jumpPortIpv6Enabled: Boolean(discovered.jumpPortIpv6Enabled || existing?.jumpPortIpv6Enabled),
+      jumpPortIpv6Interface: cleanText(discovered.jumpPortIpv6Interface) || existing?.jumpPortIpv6Interface || "",
+      status: active === "active" ? "online" : "warning",
+      lastSyncError: "",
+      lastCheckedAt: timestamp,
+      capability: provider?.capabilities || []
+    }), isNew);
+
+    if (existing) {
+      Object.assign(existing, nextNode);
+      summary.updated += 1;
+    } else {
+      state.nodes.push(nextNode);
+      summary.imported += 1;
+    }
+
+    for (const username of discoveredUsernames(discovered.users)) {
+      const existingUser = state.users.find((user) => user.username === username);
+      if (existingUser) {
+        const nodeIds = new Set(existingUser.nodeIds || []);
+        const beforeSize = nodeIds.size;
+        nodeIds.add(nextNode.id);
+        existingUser.nodeIds = Array.from(nodeIds);
+        existingUser.status = "active";
+        existingUser.updatedAt = timestamp;
+        if (nodeIds.size !== beforeSize) summary.users += 1;
+      } else {
+        state.users.push(stamp({
+          username,
+          nodeIds: [nextNode.id],
+          status: "active",
+          tx: 0,
+          rx: 0,
+          lastSeenAt: null
+        }, true));
+        summary.users += 1;
+      }
+    }
+  }
+
+  if (audit && (summary.imported || summary.updated)) {
+    appendAudit(
+      state,
+      "node.discovery",
+      `${server.name} remote nodes discovered: ${summary.imported} imported, ${summary.updated} refreshed`,
+      { serverId: server.id, jobId }
+    );
+  }
+  return summary;
 }
 
 export async function applyStatusResult({ server, node, status, jobId, audit = true }) {
@@ -246,11 +605,11 @@ function networkRates(previousMetrics, nextNetwork, timestamp) {
 }
 
 export async function applyServerStatusResult({ server, status, audit = false }) {
-  if (!status) return;
+  if (!status) return { imported: 0, updated: 0, users: 0 };
   const timestamp = new Date().toISOString();
-  await mutateDb((state) => {
+  return mutateDb((state) => {
     const savedServer = state.servers.find((item) => item.id === server.id);
-    if (!savedServer) return;
+    if (!savedServer) return { imported: 0, updated: 0, users: 0 };
     const rates = networkRates(savedServer.metrics, status.network, timestamp);
     savedServer.status = "online";
     savedServer.hookStatus = "online";
@@ -265,6 +624,7 @@ export async function applyServerStatusResult({ server, status, audit = false })
     };
     savedServer.updatedAt = timestamp;
     if (audit) appendAudit(state, "server.status.refresh", `${server.name} server status refreshed`, { serverId: server.id });
+    return mergeDiscoveredNodes(state, savedServer, status.discoveredNodes || [], { timestamp, audit });
   });
 }
 
@@ -435,7 +795,7 @@ export function subscribeJob(jobId, res, initialJob) {
 }
 
 export async function runInstallHookJob(job, { server, credential, hookPort, token }) {
-  const secrets = [credential?.password, token];
+  const secrets = [credential?.password, credential?.privateKey, credential?.passphrase, token];
   await patchJob(job.id, { status: "running" });
   await logJob(job.id, `Installing persistent hook agent on ${server.name}\n`, secrets);
 
@@ -479,10 +839,31 @@ export async function runInstallHookJob(job, { server, credential, hookPort, tok
       throw new Error(`Hook service installed, but ${hookUrl} is not reachable from this panel. Check firewall/security group for port ${hookPort}.`);
     }
 
-    await patchJob(job.id, { status: "success", result: { ...result, hookUrl } });
+    let discovery = { imported: 0, updated: 0, users: 0 };
+    try {
+      const statusResult = await callHookAgent({
+        server: nextServer,
+        action: "server-status",
+        env: serverEnv({ action: "server-status" }),
+        timeoutMs: 30_000
+      });
+      const parsedStatus = parseMarker(statusResult.output || "", "__SIMPLEUI_SERVER_STATUS__");
+      discovery = await applyServerStatusResult({ server: nextServer, status: parsedStatus, audit: true });
+      if (discovery.imported || discovery.updated) {
+        await logJob(job.id, `Discovered remote nodes: ${discovery.imported} imported, ${discovery.updated} refreshed.\n`, secrets);
+      } else {
+        await logJob(job.id, "No existing SimpleUI-managed remote nodes discovered.\n", secrets);
+      }
+    } catch (error) {
+      await logJob(job.id, `Hook is reachable, but remote node discovery failed: ${redact(error.message, secrets)}\n`, secrets);
+    }
+
+    const jobResult = { ...result, hookUrl, discovery };
+    await patchJob(job.id, { status: "success", result: jobResult });
     await logJob(job.id, "Hook agent installed and reachable.\n", secrets);
-    getStream(job.id).emit("done", { status: "success", result: { ...result, hookUrl } });
+    getStream(job.id).emit("done", { status: "success", result: jobResult });
   } catch (error) {
+    const safeError = redact(error.message, secrets);
     await mutateDb((state) => {
       const savedServer = state.servers.find((item) => item.id === server.id);
       if (savedServer) {
@@ -492,14 +873,74 @@ export async function runInstallHookJob(job, { server, credential, hookPort, tok
       }
       appendAudit(state, "hook.install.failed", `${server.name} hook install failed`, { serverId: server.id, jobId: job.id });
     });
-    await patchJob(job.id, { status: "failed", error: error.message });
-    await logJob(job.id, `Hook install failed: ${error.message}\n`, secrets);
-    getStream(job.id).emit("done", { status: "failed", error: error.message });
+    await patchJob(job.id, { status: "failed", error: safeError });
+    await logJob(job.id, `Hook install failed: ${safeError}\n`, secrets);
+    getStream(job.id).emit("done", { status: "failed", error: safeError });
+  }
+}
+
+export async function runHookUpgradeJob(job, { server }) {
+  const secrets = [server?.hookToken];
+  await patchJob(job.id, { status: "running" });
+  await logJob(job.id, `Upgrading persistent hook agent on ${server.name}\n`, secrets);
+
+  try {
+    const bundle = await buildHookUpgradeBundleB64();
+    let result;
+    try {
+      result = await callHookAgent({
+        server,
+        action: "upgrade-agent",
+        env: serverEnv({ action: "upgrade-agent" }),
+        payload: { bundleB64: bundle },
+        timeoutMs: 120_000
+      });
+      const directParsed = parseMarker(result.output || "", "__SIMPLEUI_RESULT__");
+      if (directParsed?.ok === false) {
+        throw new Error(directParsed.error || "Hook agent rejected upgrade bundle");
+      }
+    } catch (error) {
+      if (!shouldFallbackHookUpgrade(error)) throw error;
+      await logJob(job.id, `Direct hook upgrade transport failed: ${redact(error.message, secrets)}\n`, secrets);
+      result = await upgradeHookViaChunkedExec({ server, bundle, jobId: job.id, secrets });
+    }
+    await logJob(job.id, stripMarker(result.output || "", ["__SIMPLEUI_RESULT__"]), secrets);
+    const parsed = parseMarker(result.output || "", "__SIMPLEUI_RESULT__") || { ok: true };
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    const reachable = await checkHookHealth(server, 10_000);
+    await mutateDb((state) => {
+      const savedServer = state.servers.find((item) => item.id === server.id);
+      if (savedServer) {
+        savedServer.status = reachable ? "online" : "warning";
+        savedServer.hookStatus = reachable ? "online" : "unreachable";
+        savedServer.updatedAt = new Date().toISOString();
+      }
+      appendAudit(
+        state,
+        reachable ? "hook.upgrade.complete" : "hook.upgrade.unreachable",
+        reachable ? `${server.name} hook upgraded` : `${server.name} hook upgrade completed but health check failed`,
+        { serverId: server.id, jobId: job.id }
+      );
+    });
+    const jobResult = { ...parsed, reachable };
+    await patchJob(job.id, { status: reachable ? "success" : "failed", result: jobResult, error: reachable ? "" : "Hook upgraded but health check failed" });
+    await logJob(job.id, reachable ? "Hook agent upgraded and reachable.\n" : "Hook upgraded, but health check failed after restart.\n", secrets);
+    getStream(job.id).emit("done", reachable
+      ? { status: "success", result: jobResult }
+      : { status: "failed", result: jobResult, error: "Hook upgraded but health check failed" });
+  } catch (error) {
+    const safeError = redact(error.message, secrets);
+    await mutateDb((state) => {
+      appendAudit(state, "hook.upgrade.failed", `${server.name} hook upgrade failed`, { serverId: server.id, jobId: job.id });
+    });
+    await patchJob(job.id, { status: "failed", error: safeError });
+    await logJob(job.id, `Hook upgrade failed: ${safeError}\n`, secrets);
+    getStream(job.id).emit("done", { status: "failed", error: safeError });
   }
 }
 
 export async function runDeployJob(job, { server, node, users }) {
-  const secrets = [(users || []).map((user) => user.password), server?.hookToken].flat();
+  const secrets = [(users || []).map((user) => user.password), collectNodeSecrets(node), server?.hookToken].flat();
   await patchJob(job.id, { status: "running" });
   await logJob(job.id, `Starting ${node.protocol} deployment for ${server.name}\n`, secrets);
 
@@ -526,14 +967,17 @@ export async function runDeployJob(job, { server, node, users }) {
       else state.servers.push(stamp({ ...server, status: "online" }, true));
 
       const savedNode = state.nodes.find((item) => item.id === node.id);
-      const nextNode = stamp({
+      const nextNode = stamp(sanitizeNodeSecrets({
         ...(savedNode || {}),
         ...node,
         serverId: server.id,
+        managedBy: "simpleui",
+        monitorOnly: false,
+        serviceProtocol: monitorProtocols[node.protocol]?.serviceProtocol || node.serviceProtocol || (node.protocol === "trojan" ? "tcp" : "udp"),
         status: "online",
         endpoint,
         capability: providers[node.protocol]?.capabilities || []
-      }, !savedNode);
+      }), !savedNode);
       if (savedNode) Object.assign(savedNode, nextNode);
       else state.nodes.push(nextNode);
 
@@ -575,9 +1019,10 @@ export async function runDeployJob(job, { server, node, users }) {
     await logJob(job.id, job.type === "node-update" ? "Node update completed.\n" : "Deployment completed.\n", secrets);
     getStream(job.id).emit("done", { status: "success", result: deploymentResult });
   } catch (error) {
-    await patchJob(job.id, { status: "failed", error: error.message });
-    await logJob(job.id, `Deployment failed: ${error.message}\n`, secrets);
-    getStream(job.id).emit("done", { status: "failed", error: error.message });
+    const safeError = redact(error.message, secrets);
+    await patchJob(job.id, { status: "failed", error: safeError });
+    await logJob(job.id, `Deployment failed: ${safeError}\n`, secrets);
+    getStream(job.id).emit("done", { status: "failed", error: safeError });
   }
 }
 
@@ -610,6 +1055,7 @@ export async function runDeleteServerJob(job, { server }) {
     await logJob(job.id, "Server deleted after remote cleanup.\n", secrets);
     getStream(job.id).emit("done", { status: "success", result: { ok: true } });
   } catch (error) {
+    const safeError = redact(error.message, secrets);
     await mutateDb((state) => {
       const savedServer = state.servers.find((item) => item.id === server.id);
       if (savedServer) {
@@ -622,9 +1068,9 @@ export async function runDeleteServerJob(job, { server }) {
         jobId: job.id
       });
     });
-    await patchJob(job.id, { status: "failed", error: error.message });
-    await logJob(job.id, `Delete failed: ${error.message}\n`, secrets);
-    getStream(job.id).emit("done", { status: "failed", error: error.message });
+    await patchJob(job.id, { status: "failed", error: safeError });
+    await logJob(job.id, `Delete failed: ${safeError}\n`, secrets);
+    getStream(job.id).emit("done", { status: "failed", error: safeError });
   }
 }
 
@@ -666,6 +1112,7 @@ export async function runDeleteNodeJob(job, { server, node }) {
     await logJob(job.id, "Node uninstalled and local state removed.\n", secrets);
     getStream(job.id).emit("done", { status: "success", result: parsed });
   } catch (error) {
+    const safeError = redact(error.message, secrets);
     await mutateDb((state) => {
       const savedNode = state.nodes.find((item) => item.id === node.id);
       if (savedNode) {
@@ -678,9 +1125,9 @@ export async function runDeleteNodeJob(job, { server, node }) {
         jobId: job.id
       });
     });
-    await patchJob(job.id, { status: "failed", error: error.message });
-    await logJob(job.id, `Node delete failed: ${error.message}\n`, secrets);
-    getStream(job.id).emit("done", { status: "failed", error: error.message });
+    await patchJob(job.id, { status: "failed", error: safeError });
+    await logJob(job.id, `Node delete failed: ${safeError}\n`, secrets);
+    getStream(job.id).emit("done", { status: "failed", error: safeError });
   }
 }
 
@@ -707,9 +1154,10 @@ export async function runRemoteAction({ type, title, server, node, extra = {} })
       await patchJob(job.id, { status: "success", result: parsed });
       getStream(job.id).emit("done", { status: "success", result: parsed });
     } catch (error) {
-      await patchJob(job.id, { status: "failed", error: error.message });
-      await logJob(job.id, `${type} failed: ${error.message}\n`, secrets);
-      getStream(job.id).emit("done", { status: "failed", error: error.message });
+      const safeError = redact(error.message, secrets);
+      await patchJob(job.id, { status: "failed", error: safeError });
+      await logJob(job.id, `${type} failed: ${safeError}\n`, secrets);
+      getStream(job.id).emit("done", { status: "failed", error: safeError });
     }
   });
   return job;
@@ -745,7 +1193,9 @@ export async function runServerAction({ type, title, server, extra = {}, secrets
         result.output;
       const visibleOutput = type === "ipquality"
         ? stripMarker(result.output || "", ["__SIMPLEUI_IPQUALITY__"])
-        : (result.output || "");
+        : (type === "exec"
+          ? stripMarker(result.output || "", ["__SIMPLEUI_RESULT__"])
+          : (result.output || ""));
       await logJob(job.id, visibleOutput, secretValues);
       await mutateDb((state) => {
         const savedServer = state.servers.find((item) => item.id === server.id);
@@ -759,6 +1209,7 @@ export async function runServerAction({ type, title, server, extra = {}, secrets
       await patchJob(job.id, { status: "success", result: parsed });
       getStream(job.id).emit("done", { status: "success", result: parsed });
     } catch (error) {
+      const safeError = redact(error.message, secretValues);
       await mutateDb((state) => {
         const savedServer = state.servers.find((item) => item.id === server.id);
         if (savedServer) {
@@ -770,9 +1221,9 @@ export async function runServerAction({ type, title, server, extra = {}, secrets
         }
         appendAudit(state, `${type}.failed`, `${title} failed`, { serverId: server.id, jobId: job.id });
       });
-      await patchJob(job.id, { status: "failed", error: error.message });
-      await logJob(job.id, `${type} failed: ${error.message}\n`, secretValues);
-      getStream(job.id).emit("done", { status: "failed", error: error.message });
+      await patchJob(job.id, { status: "failed", error: safeError });
+      await logJob(job.id, `${type} failed: ${safeError}\n`, secretValues);
+      getStream(job.id).emit("done", { status: "failed", error: safeError });
     }
   });
   return job;

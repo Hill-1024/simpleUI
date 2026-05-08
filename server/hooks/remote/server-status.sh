@@ -147,32 +147,413 @@ def os_release():
     return values.get("PRETTY_NAME") or values.get("NAME") or platform.platform()
 
 def service_state(name):
+    if not name:
+        return "unknown"
     try:
-        return subprocess.check_output(["systemctl", "is-active", name], text=True, stderr=subprocess.DEVNULL).strip()
+        proc = subprocess.run(["systemctl", "is-active", name], text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        return proc.stdout.strip() or "unknown"
     except Exception:
         return "unknown"
 
-def managed_services():
-    service_by_protocol = {
-        "hysteria2": "hysteria-server.service",
-        "trojan": "trojan.service",
-    }
+SERVICE_BY_PROTOCOL = {
+    "hysteria2": "hysteria-server.service",
+    "trojan": "trojan.service",
+}
+
+CONFIG_BY_PROTOCOL = {
+    "hysteria2": "/etc/hysteria/config.yaml",
+    "trojan": "/usr/src/trojan/server.conf",
+}
+
+PROTOCOL_META = {
+    "hysteria2": {"name": "Hysteria2", "serviceProtocol": "udp"},
+    "trojan": {"name": "Trojan", "serviceProtocol": "tcp"},
+    "shadowsocks": {"name": "Shadowsocks", "serviceProtocol": "tcp,udp"},
+    "vmess": {"name": "VMess", "serviceProtocol": "tcp"},
+    "vless": {"name": "VLESS", "serviceProtocol": "tcp"},
+    "naive": {"name": "Naive", "serviceProtocol": "tcp,udp"},
+    "hysteria": {"name": "Hysteria", "serviceProtocol": "udp"},
+    "shadowtls": {"name": "ShadowTLS", "serviceProtocol": "tcp"},
+    "tuic": {"name": "TUIC", "serviceProtocol": "udp"},
+    "anytls": {"name": "AnyTLS", "serviceProtocol": "tcp"},
+    "wireguard": {"name": "WireGuard", "serviceProtocol": "udp"},
+    "socks": {"name": "SOCKS", "serviceProtocol": "tcp"},
+    "http": {"name": "HTTP", "serviceProtocol": "tcp"},
+    "mixed": {"name": "Mixed", "serviceProtocol": "tcp"},
+}
+
+SING_BOX_INBOUND_PROTOCOLS = {
+    "mixed", "socks", "http", "shadowsocks", "vmess", "trojan", "naive",
+    "hysteria", "shadowtls", "vless", "tuic", "hysteria2", "anytls",
+}
+
+SING_BOX_SERVICES = ["sing-box.service", "singbox.service"]
+SING_BOX_CONFIG_CANDIDATES = [
+    "/etc/sing-box/config.json",
+    "/usr/local/etc/sing-box/config.json",
+    "/usr/local/etc/singbox/config.json",
+    "/etc/singbox/config.json",
+    "/opt/sing-box/config.json",
+]
+
+def protocol_name(protocol):
+    return PROTOCOL_META.get(protocol, {}).get("name") or protocol
+
+def protocol_service_proto(protocol, network=""):
+    configured = str(network or "").strip().lower()
+    if configured:
+        values = []
+        for part in configured.replace("/", ",").replace(" ", ",").split(","):
+            if part in {"tcp", "udp"} and part not in values:
+                values.append(part)
+        if values:
+            return ",".join(values)
+    return PROTOCOL_META.get(protocol, {}).get("serviceProtocol") or "tcp"
+
+def service_unit_exists(service):
+    if not service:
+        return False
+    try:
+        proc = subprocess.run(["systemctl", "cat", service], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if proc.returncode == 0:
+            return True
+    except Exception:
+        pass
+    return os.path.exists(f"/etc/systemd/system/{service}") or os.path.exists(f"/lib/systemd/system/{service}")
+
+def first_existing_service(candidates):
+    for service in candidates:
+        if service_unit_exists(service):
+            return service
+    return candidates[0] if candidates else ""
+
+def managed_protocols():
     protocols = []
     try:
         with open("/etc/simpleui/managed-protocols", "r", encoding="utf-8", errors="ignore") as handle:
             protocols = [line.strip() for line in handle if line.strip()]
     except Exception:
-        for protocol in service_by_protocol:
+        for protocol in SERVICE_BY_PROTOCOL:
             if os.path.isdir(f"/etc/simpleui/{protocol}"):
                 protocols.append(protocol)
-    return [
+    return [protocol for protocol in dict.fromkeys(protocols) if protocol in SERVICE_BY_PROTOCOL]
+
+def managed_services():
+    services = [
         {
             "protocol": protocol,
-            "service": service_by_protocol.get(protocol, ""),
-            "active": service_state(service_by_protocol.get(protocol, "")) if service_by_protocol.get(protocol) else "unknown",
+            "service": SERVICE_BY_PROTOCOL.get(protocol, ""),
+            "active": service_state(SERVICE_BY_PROTOCOL.get(protocol, "")) if SERVICE_BY_PROTOCOL.get(protocol) else "unknown",
         }
-        for protocol in protocols
+        for protocol in managed_protocols()
     ]
+    sing_box_service = first_existing_service(SING_BOX_SERVICES)
+    if sing_box_service and service_unit_exists(sing_box_service):
+        services.append({
+            "protocol": "sing-box",
+            "service": sing_box_service,
+            "active": service_state(sing_box_service),
+        })
+    return services
+
+def read_env_file(path):
+    values = {}
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip()
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+                    value = value[1:-1]
+                if key.startswith("SIMPLEUI_"):
+                    values[key] = value
+    except Exception:
+        pass
+    return values
+
+def int_or_none(value):
+    try:
+        number = int(str(value or "").strip())
+        return number if 1 <= number <= 65535 else None
+    except Exception:
+        return None
+
+def read_kv_usernames(path):
+    usernames = []
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as handle:
+            for raw in handle:
+                if ":" not in raw:
+                    continue
+                username, _ = raw.split(":", 1)
+                username = username.strip()
+                if username:
+                    usernames.append(username)
+    except Exception:
+        pass
+    return usernames
+
+def read_json_usernames(path):
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as handle:
+            data = json.load(handle)
+    except Exception:
+        return []
+    if isinstance(data, dict):
+        return [str(key).strip() for key in data if str(key).strip()]
+    if isinstance(data, list):
+        names = []
+        for item in data:
+            if isinstance(item, dict) and str(item.get("username", "")).strip():
+                names.append(str(item.get("username")).strip())
+        return names
+    return []
+
+def unique_strings(values):
+    output = []
+    seen = set()
+    for value in values:
+        text = str(value or "").strip()
+        if text and text not in seen:
+            seen.add(text)
+            output.append(text)
+    return output
+
+def strip_json_comments(text):
+    output = []
+    index = 0
+    in_string = False
+    escaped = False
+    while index < len(text):
+        char = text[index]
+        next_char = text[index + 1] if index + 1 < len(text) else ""
+        if in_string:
+            output.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            index += 1
+            continue
+        if char == '"':
+            in_string = True
+            output.append(char)
+            index += 1
+            continue
+        if char == "/" and next_char == "/":
+            index += 2
+            while index < len(text) and text[index] not in "\r\n":
+                index += 1
+            continue
+        if char == "/" and next_char == "*":
+            index += 2
+            while index + 1 < len(text) and not (text[index] == "*" and text[index + 1] == "/"):
+                index += 1
+            index += 2
+            continue
+        output.append(char)
+        index += 1
+    return "".join(output)
+
+def read_json_file(path):
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as handle:
+            raw = handle.read()
+        return json.loads(strip_json_comments(raw))
+    except Exception:
+        return None
+
+def systemd_exec_configs(service):
+    configs = []
+    if not service:
+        return configs
+    try:
+        output = subprocess.check_output(["systemctl", "cat", service], text=True, stderr=subprocess.DEVNULL)
+    except Exception:
+        return configs
+    tokens = []
+    for raw in output.splitlines():
+        line = raw.strip()
+        if not line.startswith("ExecStart="):
+            continue
+        try:
+            import shlex
+            tokens.extend(shlex.split(line.split("=", 1)[1]))
+        except Exception:
+            tokens.extend(line.split())
+    for index, token in enumerate(tokens):
+        if token in {"-c", "--config"} and index + 1 < len(tokens):
+            configs.append(tokens[index + 1])
+        elif token.startswith("--config="):
+            configs.append(token.split("=", 1)[1])
+    return configs
+
+def sing_box_config_paths(service):
+    paths = []
+    for path in systemd_exec_configs(service) + SING_BOX_CONFIG_CANDIDATES:
+        clean = str(path or "").strip()
+        if clean and clean not in paths and os.path.isfile(clean):
+            paths.append(clean)
+    return paths
+
+def endpoint_host_from_listen(listen):
+    value = str(listen or "").strip()
+    if value in {"", "::", "0.0.0.0", "[::]", "*"}:
+        return ""
+    return value
+
+def sing_box_usernames(inbound):
+    names = []
+    for item in inbound.get("users") or []:
+        if not isinstance(item, dict):
+            continue
+        names.append(item.get("name") or item.get("username") or item.get("uuid") or "")
+    return unique_strings(names)
+
+def discover_sing_box_nodes(skip_pairs):
+    nodes = []
+    service = first_existing_service(SING_BOX_SERVICES)
+    if not service or not service_unit_exists(service):
+        return nodes
+    active = service_state(service)
+    for config_path in sing_box_config_paths(service):
+        config = read_json_file(config_path)
+        if not isinstance(config, dict):
+            continue
+        for index, inbound in enumerate(config.get("inbounds") or []):
+            if not isinstance(inbound, dict):
+                continue
+            protocol = str(inbound.get("type") or "").strip().lower()
+            if protocol not in SING_BOX_INBOUND_PROTOCOLS:
+                continue
+            port = int_or_none(inbound.get("listen_port"))
+            if not port:
+                continue
+            pair = (protocol, port)
+            if pair in skip_pairs:
+                continue
+            tag = str(inbound.get("tag") or f"{protocol}-{index + 1}").strip()
+            listen = endpoint_host_from_listen(inbound.get("listen"))
+            service_protocol = protocol_service_proto(protocol, inbound.get("network", ""))
+            tls = inbound.get("tls") if isinstance(inbound.get("tls"), dict) else {}
+            cert_path = tls.get("certificate_path") or tls.get("certificate") or ""
+            key_path = tls.get("key_path") or tls.get("key") or ""
+            nodes.append({
+                "protocol": protocol,
+                "name": f"{protocol_name(protocol)} {tag}",
+                "service": service,
+                "serviceProtocol": service_protocol,
+                "configPath": config_path,
+                "remoteKey": f"sing-box:{config_path}:inbound:{tag}:{port}",
+                "domain": "",
+                "connectHost": listen,
+                "listenPort": port,
+                "active": active,
+                "users": sing_box_usernames(inbound),
+                "managedBy": "sing-box",
+                "importSource": "sing-box-discovery",
+                "monitorOnly": True,
+                "certPath": cert_path,
+                "keyPath": key_path,
+                "tag": tag,
+            })
+        for index, endpoint in enumerate(config.get("endpoints") or []):
+            if not isinstance(endpoint, dict):
+                continue
+            protocol = str(endpoint.get("type") or "").strip().lower()
+            if protocol != "wireguard":
+                continue
+            port = int_or_none(endpoint.get("listen_port"))
+            if not port:
+                continue
+            pair = (protocol, port)
+            if pair in skip_pairs:
+                continue
+            tag = str(endpoint.get("tag") or endpoint.get("name") or f"wireguard-{index + 1}").strip()
+            nodes.append({
+                "protocol": "wireguard",
+                "name": f"WireGuard {tag}",
+                "service": service,
+                "serviceProtocol": "udp",
+                "configPath": config_path,
+                "remoteKey": f"sing-box:{config_path}:endpoint:{tag}:{port}",
+                "domain": "",
+                "connectHost": "",
+                "listenPort": port,
+                "active": active,
+                "users": [],
+                "managedBy": "sing-box",
+                "importSource": "sing-box-discovery",
+                "monitorOnly": True,
+                "tag": tag,
+            })
+    return nodes
+
+def discover_nodes():
+    nodes = []
+    skip_pairs = set()
+    for protocol in managed_protocols():
+        env_path = f"/etc/simpleui/{protocol}/managed.env"
+        env = read_env_file(env_path)
+        if not env and not os.path.isdir(f"/etc/simpleui/{protocol}"):
+            continue
+        service = env.get("SIMPLEUI_SERVICE") or SERVICE_BY_PROTOCOL.get(protocol, "")
+        config = env.get("SIMPLEUI_CONFIG") or CONFIG_BY_PROTOCOL.get(protocol, "")
+        port = int_or_none(env.get("SIMPLEUI_PORT")) or (443 if protocol in {"hysteria2", "trojan"} else None)
+        if port:
+            skip_pairs.add((protocol, port))
+        domain = env.get("SIMPLEUI_DOMAIN", "")
+        connect_host = env.get("SIMPLEUI_CONNECT_HOST") or domain
+        users = unique_strings(
+            read_kv_usernames(f"/etc/simpleui/{protocol}/users.kv") +
+            read_json_usernames(f"/etc/simpleui/{protocol}/users.json") +
+            read_json_usernames(f"/etc/simpleui/{protocol}/share-links.json")
+        )
+        node = {
+            "protocol": protocol,
+            "name": "HY2" if protocol == "hysteria2" else "Trojan",
+            "service": service,
+            "serviceProtocol": protocol_service_proto(protocol),
+            "configPath": config,
+            "remoteKey": f"{protocol}:{config}:{port or ''}",
+            "domain": domain,
+            "connectHost": connect_host,
+            "listenPort": port,
+            "active": service_state(service) if service else "unknown",
+            "users": users,
+            "managedEnvPath": env_path,
+            "managedBy": "simpleui",
+            "importSource": "remote-discovery",
+            "monitorOnly": False,
+        }
+        if protocol == "hysteria2":
+            jump_start = int_or_none(env.get("SIMPLEUI_JUMP_PORT_START"))
+            jump_end = int_or_none(env.get("SIMPLEUI_JUMP_PORT_END"))
+            node.update({
+                "tlsMode": env.get("SIMPLEUI_TLS_MODE") or "acme-http",
+                "selfSignedHost": connect_host if env.get("SIMPLEUI_TLS_MODE") == "self-signed" else "",
+                "portHoppingEnabled": bool(jump_start and jump_end),
+                "jumpPortStart": jump_start,
+                "jumpPortEnd": jump_end,
+                "jumpPortInterface": env.get("SIMPLEUI_JUMP_PORT_INTERFACE", ""),
+                "jumpPortIpv6Enabled": bool(env.get("SIMPLEUI_JUMP_PORT_IPV6_INTERFACE")),
+                "jumpPortIpv6Interface": env.get("SIMPLEUI_JUMP_PORT_IPV6_INTERFACE", ""),
+            })
+        elif protocol == "trojan":
+            node.update({
+                "tlsMode": "acme-http",
+                "certPath": os.path.join(env.get("SIMPLEUI_CERT_DIR") or "/usr/src/trojan-cert", "fullchain.cer"),
+                "keyPath": os.path.join(env.get("SIMPLEUI_CERT_DIR") or "/usr/src/trojan-cert", "private.key"),
+            })
+        nodes.append(node)
+    nodes.extend(discover_sing_box_nodes(skip_pairs))
+    return nodes
 
 load1, load5, load15 = os.getloadavg() if hasattr(os, "getloadavg") else (0, 0, 0)
 payload = {
@@ -192,6 +573,7 @@ payload = {
     "filesystems": filesystems(),
     "network": network(),
     "managedServices": managed_services(),
+    "discoveredNodes": discover_nodes(),
 }
 print("__SIMPLEUI_SERVER_STATUS__" + json.dumps(payload, ensure_ascii=False))
 PY

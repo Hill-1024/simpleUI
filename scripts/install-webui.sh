@@ -9,11 +9,46 @@ HOST="${SIMPLEUI_HOST:-127.0.0.1}"
 PORT="${SIMPLEUI_PORT:-8787}"
 PNPM_VERSION="${SIMPLEUI_PNPM_VERSION:-10.33.2}"
 NODE_MAJOR="${SIMPLEUI_NODE_MAJOR:-22}"
+ACTION="${1:-${SIMPLEUI_ACTION:-install}}"
 
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "Please run this script as root." >&2
   exit 1
 fi
+
+uninstall_webui() {
+  systemctl disable --now simpleui-web.service >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/simpleui-web.service
+  systemctl daemon-reload
+  systemctl reset-failed simpleui-web.service >/dev/null 2>&1 || true
+
+  if [[ "${SIMPLEUI_KEEP_DATA:-0}" == "1" ]]; then
+    echo "SimpleUI WebUI service removed. Data kept at ${APP_DIR}."
+    return
+  fi
+
+  if [[ -n "${APP_DIR}" && "${APP_DIR}" != "/" ]]; then
+    rm -rf -- "${APP_DIR}"
+  fi
+  if id "${APP_USER}" >/dev/null 2>&1; then
+    userdel "${APP_USER}" >/dev/null 2>&1 || true
+  fi
+
+  echo "SimpleUI WebUI uninstalled."
+}
+
+case "${ACTION}" in
+  install|upgrade|update)
+    ;;
+  uninstall|remove|--uninstall)
+    uninstall_webui
+    exit 0
+    ;;
+  *)
+    echo "Usage: $0 [install|uninstall]" >&2
+    exit 64
+    ;;
+esac
 
 install_base_packages() {
   if command -v apt-get >/dev/null 2>&1; then

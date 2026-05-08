@@ -1,8 +1,14 @@
 protocol="${SIMPLEUI_PROTOCOL:-hysteria2}"
 action="${SIMPLEUI_SERVICE_ACTION:-restart}"
-service="hysteria-server.service"
-if [ "$protocol" = "trojan" ]; then
-  service="trojan.service"
+service="${SIMPLEUI_SERVICE:-}"
+if [ -z "$service" ]; then
+  service="hysteria-server.service"
+  if [ "$protocol" = "trojan" ]; then
+    service="trojan.service"
+  elif [ "$protocol" != "hysteria2" ]; then
+    simpleui_log "No systemd service is known for ${protocol}; register the monitor with a service name to control it."
+    exit 51
+  fi
 fi
 
 case "$action" in

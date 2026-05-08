@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import {
   Activity,
   Ban,
@@ -17,6 +17,7 @@ import {
   Network,
   PackageCheck,
   Pencil,
+  Plus,
   RefreshCcw,
   RotateCw,
   Save,
@@ -40,7 +41,8 @@ const state = reactive({
   bans: [],
   jobs: [],
   audit: [],
-  providers: []
+  providers: [],
+  monitorProtocols: []
 });
 
 const loading = ref(true);
@@ -55,9 +57,10 @@ const pageDefinitions = [
   { id: "overview", title: "舰队总览", description: "服务器、节点、连接来源与流量态势。" },
   { id: "servers", title: "服务器管理", description: "添加服务器、安装或升级持久化 Hook，并维护服务器名称、分组与连接信息。" },
   { id: "deploy", title: "节点部署", description: "在 Hook 已就绪的服务器上部署或重新部署 Hysteria2 / Trojan 节点。" },
-  { id: "nodes", title: "节点管理", description: "查看节点状态、资源同步结果，并执行修改、重启、卸载或强制清理。" },
+  { id: "nodes", title: "节点管理", description: "查看节点状态、资源同步结果，并把已有 sing-box 主流协议节点纳入监控。" },
   { id: "connections", title: "连接统计与封禁", description: "按客户端 IP 查看连接到节点的流量，并在弹窗中选择要应用封禁的节点。" },
   { id: "tools", title: "服务器工具", description: "执行性能优化和 IPQuality 双栈检测等 Hook 侧任务。" },
+  { id: "terminal", title: "服务器终端", description: "通过已安装的持久化 Hook 在目标服务器上执行维护命令。" },
   { id: "logs", title: "任务日志", description: "查看当前任务的 Hook 输出，以及需要排障时的原始执行日志。" },
   { id: "about", title: "关于 SimpleUI", description: "项目信息、发布信息与桌面端构建目标。" }
 ];
@@ -80,6 +83,7 @@ const selectedNodes = ref([]);
 const serversGrouped = ref(false);
 const nodesGrouped = ref(false);
 const banNodeModalOpen = ref(false);
+const manualNodeModalOpen = ref(false);
 const banNodeSearch = ref("");
 const banNodeGroupFilter = ref("all");
 const banNodesGrouped = ref(true);
@@ -87,6 +91,12 @@ const jobLogs = ref([]);
 const activeJob = ref(null);
 const toolFeedback = ref(null);
 const toolFeedbackLogExpanded = ref(false);
+const pageTaskFeedback = reactive({
+  servers: null,
+  deploy: null,
+  nodes: null,
+  connections: null
+});
 const ipQualityModal = ref(null);
 const taskPanelCollapsed = ref(false);
 const taskSearch = ref("");
@@ -140,8 +150,24 @@ const deployNode = reactive({
   jumpPortIpv6Interface: ""
 });
 const usersText = ref("");
+const manualNodeForm = reactive({
+  serverId: "",
+  protocol: "shadowsocks",
+  name: "",
+  group: "",
+  endpoint: "",
+  domain: "",
+  listenPort: 443,
+  service: "sing-box.service",
+  serviceProtocol: "tcp,udp"
+});
 const sourceIp = ref("");
 const toolServerId = ref("");
+const terminalServerId = ref("");
+const terminalSessions = reactive({});
+const terminalSubscriptions = new Map();
+const terminalOutputRef = ref(null);
+const terminalCommandInputRef = ref(null);
 const optimizeAction = ref("status");
 const ipQualityForm = reactive({
   mode: "dual",
@@ -188,6 +214,13 @@ const taskStatusOptions = [
   { value: "success", label: "完成" },
   { value: "failed", label: "失败" }
 ];
+const serverPageTaskTypes = new Set(["hook-install", "hook-upgrade", "server-delete", "server-reboot"]);
+const pageTaskFeedbackConfig = {
+  servers: { title: "服务器任务反馈", types: serverPageTaskTypes },
+  deploy: { title: "部署任务反馈", types: new Set(["deploy", "node-update"]) },
+  nodes: { title: "节点任务反馈", types: new Set(["status", "service", "node-delete"]) },
+  connections: { title: "封禁任务反馈", types: new Set(["ban", "batch"]) }
+};
 const connectionSortOptions = [
   { value: "total", label: "总流量" },
   { value: "rx", label: "RX 流量" },
@@ -199,12 +232,26 @@ const connectionSortOptions = [
   { value: "protocol", label: "协议" }
 ];
 
+const emptyTerminalSession = reactive({
+  serverId: "",
+  command: "",
+  cwd: "/root",
+  timeoutSeconds: 600,
+  output: "",
+  job: null,
+  running: false
+});
+
 const currentProvider = computed(() => state.providers.find((item) => item.id === deployProtocol.value));
+const monitorProtocolMap = computed(() => Object.fromEntries((state.monitorProtocols || []).map((item) => [item.id, item])));
+const monitorProtocolOptions = computed(() => (state.monitorProtocols || []).filter((item) => !item.deployable));
+const currentManualProtocol = computed(() => monitorProtocolMap.value[manualNodeForm.protocol]);
 const isHy2 = computed(() => deployProtocol.value === "hysteria2");
 const isPasswordAuthProtocol = computed(() => ["hysteria2", "trojan"].includes(deployProtocol.value));
 const hasFixedListenPort = computed(() => deployProtocol.value === "trojan");
 const readyServers = computed(() => state.servers.filter((server) => server.hookStatus === "online" || server.hookInstalled));
 const readyServerIds = computed(() => new Set(readyServers.value.map((server) => server.id)));
+const activeTerminalSession = computed(() => ensureTerminalSession(terminalServerId.value) || emptyTerminalSession);
 const serverRows = computed(() => groupedRows(state.servers, serversGrouped.value, "全部服务器", "server"));
 const nodeRows = computed(() => groupedRows(state.nodes, nodesGrouped.value, "全部节点", "node"));
 const nodeGroupOptions = computed(() => uniqueGroups(state.nodes));
@@ -334,6 +381,12 @@ const visibleJobs = computed(() => {
     seen.add(job.id);
   }
   return jobs;
+});
+const activePageTaskFeedback = computed(() => pageTaskFeedbackConfig[activePage.value] || null);
+const activePageTask = computed(() => (activePageTaskFeedback.value ? pageTaskFeedback[activePage.value] : null));
+const activePageTaskCards = computed(() => {
+  const job = activePageTask.value;
+  return job ? [job] : [];
 });
 const taskTypeOptions = computed(() => {
   const types = Array.from(new Set(visibleJobs.value.map((job) => job.type).filter(Boolean)));
@@ -560,7 +613,13 @@ function jobSummary(job) {
   if (job.type === "node-delete") return "节点清理完成";
   if (job.type === "server-delete") return "服务器清理完成";
   if (job.type === "server-reboot") return job.result?.delaySeconds ? `服务器将在 ${job.result.delaySeconds} 秒后重启` : "服务器重启已下发";
-  if (job.type === "hook-install") return result?.hookUrl ? `Hook 已就绪：${result.hookUrl}` : "Hook 安装完成";
+  if (job.type === "hook-install") {
+    const discovered = Number(result?.discovery?.imported || 0) + Number(result?.discovery?.updated || 0);
+    if (discovered) return `Hook 已就绪，已检出 ${discovered} 个远端节点`;
+    return result?.hookUrl ? `Hook 已就绪：${result.hookUrl}` : "Hook 安装完成";
+  }
+  if (job.type === "hook-upgrade") return result?.reachable ? "Hook 在线升级完成" : "Hook 在线升级已返回";
+  if (job.type === "exec" && result && typeof result === "object") return `命令退出码 ${result.exitCode ?? "-"}`;
   return result ? "已返回结构化结果" : "完成";
 }
 
@@ -575,6 +634,8 @@ function jobKindLabel(type) {
     "node-delete": "卸载节点",
     "server-delete": "删除服务器",
     "server-reboot": "服务器重启",
+    "hook-upgrade": "Hook 升级",
+    exec: "终端命令",
     optimize: "优化",
     ipquality: "IPQuality"
   };
@@ -630,6 +691,87 @@ function toolFeedbackLogText(job = toolFeedback.value) {
   return text.trim() ? text : "等待 Hook 输出...";
 }
 
+function taskLogText(job) {
+  const text = (job?.logs || []).join("");
+  return text.trim() ? text : "等待 Hook 输出...";
+}
+
+function taskHasLogs(job) {
+  return Boolean((job?.logs || []).length);
+}
+
+function ensureTerminalSession(serverId) {
+  if (!serverId) return null;
+  if (!terminalSessions[serverId]) {
+    terminalSessions[serverId] = {
+      serverId,
+      command: "",
+      cwd: "/root",
+      timeoutSeconds: 600,
+      output: "",
+      job: null,
+      running: false
+    };
+  }
+  return terminalSessions[serverId];
+}
+
+function appendTerminalOutput(serverId, text) {
+  const session = ensureTerminalSession(serverId);
+  if (!session) return;
+  session.output = `${session.output}${text}`.slice(-120_000);
+  scrollTerminalToBottom();
+}
+
+function scrollTerminalToBottom() {
+  nextTick(() => {
+    const element = terminalOutputRef.value;
+    if (element) element.scrollTop = element.scrollHeight;
+  });
+}
+
+function focusTerminalInput() {
+  nextTick(() => {
+    terminalCommandInputRef.value?.focus?.();
+  });
+}
+
+function closeTerminalSubscription(serverId = "") {
+  if (serverId) {
+    const unsubscribe = terminalSubscriptions.get(serverId);
+    if (unsubscribe) unsubscribe();
+    terminalSubscriptions.delete(serverId);
+    return;
+  }
+  for (const unsubscribe of terminalSubscriptions.values()) {
+    unsubscribe();
+  }
+  terminalSubscriptions.clear();
+}
+
+function terminalSessionRunning(session = activeTerminalSession.value) {
+  return Boolean(session?.running || ["queued", "running"].includes(session?.job?.status));
+}
+
+function terminalPrompt(session = activeTerminalSession.value) {
+  if (!session?.serverId) return "$";
+  return `${serverName(session.serverId)}:${session.cwd || "/root"}$`;
+}
+
+function isSimpleCdCommand(command = "") {
+  const text = String(command || "").trim();
+  return text === "cd" || /^cd\s+[^;&|`$()]+$/.test(text);
+}
+
+function cdTarget(command = "") {
+  const text = String(command || "").trim();
+  return text === "cd" ? "~" : text.slice(3).trim();
+}
+
+function shellQuote(value = "") {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
 function serverName(serverId) {
   return state.servers.find((server) => server.id === serverId)?.name || "未知服务器";
 }
@@ -641,7 +783,23 @@ function nodeName(nodeId) {
 function nodeProtocolLabel(protocol) {
   if (protocol === "hysteria2") return "HY2";
   if (protocol === "trojan") return "Trojan";
+  if (monitorProtocolMap.value[protocol]?.name) return monitorProtocolMap.value[protocol].name;
   return protocol || "-";
+}
+
+function nodeSourceLabel(node = {}) {
+  if (node.managedBy === "sing-box") return "sing-box 自动发现";
+  if (node.managedBy === "manual" || node.importSource === "manual-monitor") return "手动监控";
+  if (node.monitorOnly) return "仅监控";
+  return "SimpleUI 管理";
+}
+
+function isDeployableNode(node = {}) {
+  return state.providers.some((provider) => provider.id === node.protocol) && !node.monitorOnly;
+}
+
+function canControlNodeService(node = {}) {
+  return readyServerIds.value.has(node.serverId) && Boolean(node.service || isDeployableNode(node));
 }
 
 function nodeGroupById(nodeId) {
@@ -739,13 +897,22 @@ function clearRuntimeState() {
     bans: [],
     jobs: [],
     audit: [],
-    providers: []
+    providers: [],
+    monitorProtocols: []
   });
   selectedNodes.value = [];
   activeJob.value = null;
   jobLogs.value = [];
   toolFeedback.value = null;
+  for (const page of Object.keys(pageTaskFeedback)) {
+    pageTaskFeedback[page] = null;
+  }
   ipQualityModal.value = null;
+  closeTerminalSubscription();
+  for (const key of Object.keys(terminalSessions)) {
+    delete terminalSessions[key];
+  }
+  terminalServerId.value = "";
 }
 
 function handleAuthError(error) {
@@ -838,9 +1005,19 @@ async function load() {
   if (!deployServerId.value && readyServers.value.length) {
     deployServerId.value = readyServers.value[0].id;
   }
+  if (!manualNodeForm.serverId && readyServers.value.length) {
+    manualNodeForm.serverId = readyServers.value[0].id;
+  }
+  if (!monitorProtocolMap.value[manualNodeForm.protocol] && monitorProtocolOptions.value.length) {
+    manualNodeForm.protocol = monitorProtocolOptions.value[0].id;
+  }
   if (!toolServerId.value && readyServers.value.length) {
     toolServerId.value = readyServers.value[0].id;
   }
+  if (!terminalServerId.value && readyServers.value.length) {
+    terminalServerId.value = readyServers.value[0].id;
+  }
+  if (terminalServerId.value) ensureTerminalSession(terminalServerId.value);
   loading.value = false;
 }
 
@@ -896,18 +1073,71 @@ function clearToolFeedback() {
   toolFeedbackLogExpanded.value = false;
 }
 
+function startPageTaskFeedback(job, page = activePage.value, title = job?.title) {
+  if (!pageTaskFeedbackConfig[page]) return;
+  pageTaskFeedback[page] = {
+    ...(job || {}),
+    title: title || job?.title || "任务",
+    feedbackPage: page,
+    status: job?.status || "queued",
+    createdAt: job?.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    logs: []
+  };
+}
+
+function appendPageTaskFeedbackLog(page, line) {
+  const current = pageTaskFeedback[page];
+  if (!current) return;
+  const logs = [...(current.logs || []), line].slice(-500);
+  const status = current.status === "queued" ? "running" : current.status;
+  pageTaskFeedback[page] = { ...current, status, logs, updatedAt: new Date().toISOString() };
+}
+
+function updatePageTaskFeedback(page, patch = {}) {
+  const current = pageTaskFeedback[page];
+  if (!current) return;
+  pageTaskFeedback[page] = {
+    ...current,
+    ...patch,
+    logs: patch.logs || current.logs || [],
+    updatedAt: new Date().toISOString()
+  };
+}
+
+function clearPageTaskFeedback(page = activePage.value) {
+  if (!pageTaskFeedbackConfig[page]) return;
+  pageTaskFeedback[page] = null;
+}
+
 function watchJob(job, options = {}) {
-  activeJob.value = job;
+  const feedbackPage = options.feedbackPage || activePage.value;
+  activeJob.value = {
+    ...job,
+    feedbackPage,
+    logs: []
+  };
   jobLogs.value = [];
+  startPageTaskFeedback(job, feedbackPage, options.title);
   if (options.feedbackScope === "tools") startToolFeedback(job, options.title);
   subscribeJob(job.id, {
     onLog: (line) => {
       jobLogs.value.push(line);
+      if (activeJob.value?.id === job.id) {
+        activeJob.value = {
+          ...activeJob.value,
+          status: activeJob.value.status === "queued" ? "running" : activeJob.value.status,
+          logs: [...jobLogs.value],
+          updatedAt: new Date().toISOString()
+        };
+      }
+      appendPageTaskFeedbackLog(feedbackPage, line);
       if (options.feedbackScope === "tools") appendToolFeedbackLog(line);
     },
     onDone: (done) => {
-      const completedJob = { ...activeJob.value, ...done };
+      const completedJob = { ...activeJob.value, ...done, logs: [...jobLogs.value], updatedAt: new Date().toISOString() };
       activeJob.value = completedJob;
+      updatePageTaskFeedback(feedbackPage, completedJob);
       if (options.feedbackScope === "tools") updateToolFeedback(done);
       if (completedJob.type === "ipquality" && done?.result) {
         ipQualityModal.value = done.result;
@@ -916,6 +1146,20 @@ function watchJob(job, options = {}) {
       load().catch(showError);
     },
     onError: () => {
+      if (activeJob.value?.id === job.id) {
+        activeJob.value = {
+          ...activeJob.value,
+          status: "failed",
+          error: "任务订阅中断，请查看任务日志确认最终状态。",
+          logs: [...jobLogs.value],
+          updatedAt: new Date().toISOString()
+        };
+      }
+      updatePageTaskFeedback(feedbackPage, {
+        status: "failed",
+        error: "任务订阅中断，请查看任务日志确认最终状态。",
+        logs: [...jobLogs.value]
+      });
       if (options.feedbackScope === "tools") {
         updateToolFeedback({ status: "failed", error: "任务订阅中断，请查看任务日志确认最终状态。" });
       }
@@ -925,18 +1169,37 @@ function watchJob(job, options = {}) {
 }
 
 function watchJobs(jobs, title, options = {}) {
+  const feedbackPage = options.feedbackPage || activePage.value;
   const pending = new Set(jobs.map((job) => job.id));
   const ipQualityResults = [];
   let failed = 0;
-  activeJob.value = { id: "batch", title, type: "batch", status: "running", createdAt: new Date().toISOString() };
+  activeJob.value = {
+    id: "batch",
+    title,
+    type: "batch",
+    status: "running",
+    feedbackPage,
+    createdAt: new Date().toISOString(),
+    logs: []
+  };
   jobLogs.value = [];
+  startPageTaskFeedback(activeJob.value, feedbackPage, title);
   if (options.feedbackScope === "tools") startToolFeedback(activeJob.value, title);
   for (const job of jobs) {
     jobLogs.value.push(`--- ${job.title} ---\n`);
+    activeJob.value = { ...activeJob.value, logs: [...jobLogs.value], updatedAt: new Date().toISOString() };
+    appendPageTaskFeedbackLog(feedbackPage, `--- ${job.title} ---\n`);
     if (options.feedbackScope === "tools") appendToolFeedbackLog(`--- ${job.title} ---\n`);
     subscribeJob(job.id, {
       onLog: (line) => {
         jobLogs.value.push(line);
+        activeJob.value = {
+          ...activeJob.value,
+          status: activeJob.value.status === "queued" ? "running" : activeJob.value.status,
+          logs: [...jobLogs.value],
+          updatedAt: new Date().toISOString()
+        };
+        appendPageTaskFeedbackLog(feedbackPage, line);
         if (options.feedbackScope === "tools") appendToolFeedbackLog(line);
       },
       onDone: (done) => {
@@ -953,9 +1216,11 @@ function watchJobs(jobs, title, options = {}) {
             status: failed ? "failed" : "success",
             updatedAt: new Date().toISOString(),
             error: failed ? `${failed} 个子任务失败` : "",
+            logs: [...jobLogs.value],
             result: ipQualityResults.length ? { reports: ipQualityResults } : undefined
           };
           activeJob.value = completedBatch;
+          updatePageTaskFeedback(feedbackPage, completedBatch);
           if (options.feedbackScope === "tools") updateToolFeedback(completedBatch);
           if (ipQualityResults.length) {
             ipQualityModal.value = { reports: ipQualityResults };
@@ -968,7 +1233,15 @@ function watchJobs(jobs, title, options = {}) {
         pending.delete(job.id);
         if (!pending.size) {
           busy.value = false;
-          if (options.feedbackScope === "tools") updateToolFeedback({ status: "failed", error: `${failed} 个子任务失败或订阅中断` });
+          const errorPatch = {
+            status: "failed",
+            error: `${failed} 个子任务失败或订阅中断`,
+            logs: [...jobLogs.value],
+            updatedAt: new Date().toISOString()
+          };
+          activeJob.value = { ...activeJob.value, ...errorPatch };
+          updatePageTaskFeedback(feedbackPage, errorPatch);
+          if (options.feedbackScope === "tools") updateToolFeedback(errorPatch);
         }
       }
     });
@@ -988,6 +1261,9 @@ async function clearJobs() {
     taskSearch.value = "";
     taskStatusFilter.value = "all";
     taskTypeFilter.value = "all";
+    for (const page of Object.keys(pageTaskFeedback)) {
+      pageTaskFeedback[page] = null;
+    }
   } catch (error) {
     showError(error);
   }
@@ -1068,7 +1344,19 @@ async function installServer() {
       credential: { ...serverCredential }
     });
     resetServerForm();
-    watchJob(result.job);
+    watchJob(result.job, { feedbackPage: "servers" });
+  } catch (error) {
+    busy.value = false;
+    showError(error);
+  }
+}
+
+async function upgradeHook(server) {
+  if (!window.confirm(`通过现有 hook 在线升级 ${server.name}？如果目标服务器运行的是旧版 hook，可能需要先用 SSH 重装一次来获得在线升级能力。`)) return;
+  busy.value = true;
+  try {
+    const result = await api.upgradeHook(server.id);
+    watchJob(result.job, { feedbackPage: "servers" });
   } catch (error) {
     busy.value = false;
     showError(error);
@@ -1080,7 +1368,7 @@ async function deleteServer(server) {
   busy.value = true;
   try {
     const result = await api.deleteServer(server.id);
-    watchJob(result.job);
+    watchJob(result.job, { feedbackPage: "servers" });
   } catch (error) {
     busy.value = false;
     showError(error);
@@ -1106,7 +1394,7 @@ async function rebootServer(server) {
   busy.value = true;
   try {
     const result = await api.rebootServer(server.id);
-    watchJob(result.job);
+    watchJob(result.job, { feedbackPage: "servers" });
   } catch (error) {
     busy.value = false;
     showError(error);
@@ -1148,7 +1436,35 @@ function resetDeployForm() {
   usersText.value = "";
 }
 
+function resetManualNodeForm() {
+  Object.assign(manualNodeForm, {
+    serverId: readyServers.value[0]?.id || "",
+    protocol: monitorProtocolOptions.value[0]?.id || "shadowsocks",
+    name: "",
+    group: "",
+    endpoint: "",
+    domain: "",
+    listenPort: 443,
+    service: "sing-box.service",
+    serviceProtocol: monitorProtocolOptions.value[0]?.serviceProtocol || "tcp"
+  });
+}
+
+function openManualNodeModal() {
+  if (!manualNodeForm.serverId && readyServers.value.length) {
+    manualNodeForm.serverId = readyServers.value[0].id;
+  }
+  if (!monitorProtocolMap.value[manualNodeForm.protocol] && monitorProtocolOptions.value.length) {
+    manualNodeForm.protocol = monitorProtocolOptions.value[0].id;
+  }
+  manualNodeModalOpen.value = true;
+}
+
 function startEditNode(node) {
+  if (!isDeployableNode(node)) {
+    toast.value = "这个节点是监控登记节点，只能刷新状态或移除监控记录。";
+    return;
+  }
   editingNodeId.value = node.id;
   editingNodeName.value = node.name;
   deployServerId.value = node.serverId;
@@ -1186,6 +1502,33 @@ function startEditNode(node) {
   window.location.hash = "deploy";
 }
 
+async function submitManualNode() {
+  busy.value = true;
+  try {
+    await api.createMonitorNode({
+      serverId: manualNodeForm.serverId,
+      node: {
+        protocol: manualNodeForm.protocol,
+        name: manualNodeForm.name,
+        group: manualNodeForm.group,
+        endpoint: manualNodeForm.endpoint,
+        domain: manualNodeForm.domain,
+        listenPort: manualNodeForm.listenPort,
+        service: manualNodeForm.service,
+        serviceProtocol: manualNodeForm.serviceProtocol || currentManualProtocol.value?.serviceProtocol,
+        configPath: ""
+      }
+    });
+    manualNodeModalOpen.value = false;
+    resetManualNodeForm();
+    await load();
+  } catch (error) {
+    showError(error);
+  } finally {
+    busy.value = false;
+  }
+}
+
 async function submitDeployment() {
   if (editingNodeId.value) return updateNode();
   return deploy();
@@ -1205,7 +1548,7 @@ async function deploy() {
       },
       users: parseUsers(usersText.value, deployProtocol.value)
     });
-    watchJob(result.job);
+    watchJob(result.job, { feedbackPage: "deploy" });
   } catch (error) {
     busy.value = false;
     showError(error);
@@ -1227,7 +1570,7 @@ async function updateNode() {
       users: parseUsers(usersText.value, deployProtocol.value)
     });
     resetDeployForm();
-    watchJob(result.job);
+    watchJob(result.job, { feedbackPage: "deploy" });
   } catch (error) {
     busy.value = false;
     showError(error);
@@ -1238,7 +1581,7 @@ async function refreshNode(node) {
   busy.value = true;
   try {
     const result = await api.refreshStatus({ serverId: node.serverId, nodeId: node.id });
-    watchJob(result.job);
+    watchJob(result.job, { feedbackPage: "nodes" });
   } catch (error) {
     busy.value = false;
     showError(error);
@@ -1249,7 +1592,7 @@ async function serviceNode(node, action) {
   busy.value = true;
   try {
     const result = await api.service({ serverId: node.serverId, nodeId: node.id, action });
-    watchJob(result.job);
+    watchJob(result.job, { feedbackPage: "nodes" });
   } catch (error) {
     busy.value = false;
     showError(error);
@@ -1261,7 +1604,7 @@ async function deleteNode(node) {
   busy.value = true;
   try {
     const result = await api.deleteNode(node.id);
-    watchJob(result.job);
+    watchJob(result.job, { feedbackPage: "nodes" });
   } catch (error) {
     busy.value = false;
     showError(error);
@@ -1269,7 +1612,10 @@ async function deleteNode(node) {
 }
 
 async function forceClearNode(node) {
-  if (!window.confirm(`强制清除节点 ${node.name}？该动作只删除本地记录，不会连接服务器，也不会清理远端服务。`)) return;
+  const message = node.monitorOnly
+    ? `移除 ${node.name} 的本地监控记录？该动作不会连接服务器，也不会改动远端服务。`
+    : `强制清除节点 ${node.name}？该动作只删除本地记录，不会连接服务器，也不会清理远端服务。`;
+  if (!window.confirm(message)) return;
   busy.value = true;
   try {
     await api.forceClearNode(node.id);
@@ -1290,7 +1636,7 @@ async function runBan() {
       targetIp: sourceIp.value,
       nodeIds: selectedNodes.value
     });
-    watchJobs(result.jobs, `批量封禁客户端 IP ${sourceIp.value}`);
+    watchJobs(result.jobs, `批量封禁客户端 IP ${sourceIp.value}`, { feedbackPage: "connections" });
   } catch (error) {
     busy.value = false;
     showError(error);
@@ -1329,11 +1675,91 @@ async function runIpQuality() {
   }
 }
 
+async function runTerminalCommand() {
+  const serverId = terminalServerId.value;
+  const session = ensureTerminalSession(serverId);
+  const command = session?.command.trim();
+  if (!command || !serverId || terminalSessionRunning(session)) return;
+  const isCd = isSimpleCdCommand(command);
+  const remoteCommand = isCd ? `cd ${shellQuote(cdTarget(command))} && pwd` : command;
+  let hiddenOutput = "";
+  closeTerminalSubscription(serverId);
+  session.running = true;
+  session.job = {
+    id: "pending",
+    title: `Terminal ${serverName(serverId)}`,
+    status: "queued",
+    createdAt: new Date().toISOString()
+  };
+  appendTerminalOutput(serverId, `${terminalPrompt(session)} ${command}\n`);
+  session.command = "";
+  try {
+    const result = await api.runCommand({
+      serverId,
+      command: remoteCommand,
+      cwd: session.cwd || "/root",
+      timeoutSeconds: session.timeoutSeconds || 600
+    });
+    session.job = result.job;
+    const unsubscribe = subscribeJob(result.job.id, {
+      onLog: (line) => {
+        if (isCd) hiddenOutput += line;
+        else appendTerminalOutput(serverId, line);
+      },
+      onDone: (done) => {
+        session.job = { ...session.job, ...done };
+        session.running = false;
+        terminalSubscriptions.delete(serverId);
+        if (isCd && done.status === "success" && done.result?.exitCode === 0) {
+          const nextCwd = hiddenOutput.trim().split(/\r?\n/).filter(Boolean).at(-1);
+          if (nextCwd) session.cwd = nextCwd;
+        } else if (isCd) {
+          appendTerminalOutput(serverId, hiddenOutput);
+        }
+        appendTerminalOutput(serverId, done.status === "success" ? "" : `\n[${statusLabel(done.status)}]\n`);
+        focusTerminalInput();
+        load().catch(showError);
+      },
+      onError: () => {
+        session.running = false;
+        terminalSubscriptions.delete(serverId);
+        appendTerminalOutput(serverId, "\n[任务订阅中断，请到任务日志确认最终状态]\n");
+        focusTerminalInput();
+      }
+    });
+    terminalSubscriptions.set(serverId, unsubscribe);
+  } catch (error) {
+    session.running = false;
+    session.job = { ...session.job, status: "failed", error: error?.message };
+    appendTerminalOutput(serverId, `\n[请求失败] ${error?.message || String(error)}\n`);
+    focusTerminalInput();
+    showError(error);
+  }
+}
+
+function clearTerminal() {
+  const session = ensureTerminalSession(terminalServerId.value);
+  if (session) session.output = "";
+  focusTerminalInput();
+}
+
 watch(
   () => [deployProtocol.value, deployNode.portHoppingEnabled],
   ([protocol]) => {
     if (protocol === "trojan") deployNode.listenPort = 443;
   }
+);
+
+watch(
+  () => manualNodeForm.protocol,
+  (protocol) => {
+    manualNodeForm.serviceProtocol = monitorProtocolMap.value[protocol]?.serviceProtocol || "tcp";
+  }
+);
+
+watch(
+  () => terminalServerId.value,
+  () => focusTerminalInput()
 );
 
 onMounted(() => {
@@ -1354,6 +1780,7 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener("hashchange", syncPageFromHash);
   stopRefresh();
+  closeTerminalSubscription();
 });
 </script>
 
@@ -1397,6 +1824,7 @@ onUnmounted(() => {
         <a href="#nodes" :class="{ active: activePage === 'nodes' }"><Wifi :size="17" />节点</a>
         <a href="#connections" :class="{ active: activePage === 'connections' }"><Ban :size="17" />连接封禁</a>
         <a href="#tools" :class="{ active: activePage === 'tools' }"><Gauge :size="17" />工具</a>
+        <a href="#terminal" :class="{ active: activePage === 'terminal' }"><Terminal :size="17" />终端</a>
         <a href="#logs" :class="{ active: activePage === 'logs' }"><Terminal :size="17" />日志</a>
         <a href="#about" :class="{ active: activePage === 'about' }"><Info :size="17" />关于</a>
       </nav>
@@ -1502,7 +1930,7 @@ onUnmounted(() => {
                   </tr>
                   <tr v-else>
                     <td><input type="checkbox" :checked="selectedNodes.includes(row.node.id)" @change="toggleNode(row.node.id, $event.target.checked)" /></td>
-                    <td><strong>{{ row.node.name }}</strong><small>{{ row.node.protocol }}</small></td>
+                    <td><strong>{{ row.node.name }}</strong><small>{{ nodeProtocolLabel(row.node.protocol) }}</small></td>
                     <td><span class="group-badge">{{ groupLabel(row.node.group) }}</span></td>
                     <td>{{ serverName(row.node.serverId) }}</td>
                     <td>{{ row.node.endpoint || "-" }}</td>
@@ -1519,6 +1947,90 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
+
+      <div v-if="manualNodeModalOpen" class="modal-backdrop" @click.self="manualNodeModalOpen = false">
+        <form class="node-select-modal manual-node-modal" @submit.prevent="submitManualNode">
+          <div class="modal-head">
+            <div>
+              <h2>手动添加监控节点</h2>
+              <span>只登记已有节点的监听信息，不执行安装、证书申请或配置写入。</span>
+            </div>
+            <button type="button" title="关闭" @click="manualNodeModalOpen = false"><X :size="18" /></button>
+          </div>
+          <div class="manual-node-form">
+            <label>
+              <span>目标服务器</span>
+              <select v-model="manualNodeForm.serverId" required>
+                <option value="" disabled>选择 hook 已就绪的服务器</option>
+                <option v-for="server in readyServers" :key="server.id" :value="server.id">{{ server.name }}</option>
+              </select>
+            </label>
+            <label>
+              <span>协议</span>
+              <select v-model="manualNodeForm.protocol" required>
+                <option v-for="protocol in monitorProtocolOptions" :key="protocol.id" :value="protocol.id">{{ protocol.name }}</option>
+              </select>
+            </label>
+            <label><span>节点名</span><input v-model="manualNodeForm.name" required placeholder="如 JP VLESS 443" /></label>
+            <label><span>节点分组</span><input v-model="manualNodeForm.group" placeholder="可选" /></label>
+            <label><span>入口地址</span><input v-model="manualNodeForm.endpoint" placeholder="留空使用服务器主机 + 端口" /></label>
+            <label><span>域名 / 连接主机</span><input v-model="manualNodeForm.domain" placeholder="可选" /></label>
+            <label><span>监听端口</span><input v-model.number="manualNodeForm.listenPort" type="number" min="1" max="65535" required /></label>
+            <label>
+              <span>传输</span>
+              <select v-model="manualNodeForm.serviceProtocol" required>
+                <option value="tcp">TCP</option>
+                <option value="udp">UDP</option>
+                <option value="tcp,udp">TCP + UDP</option>
+              </select>
+            </label>
+            <label class="span-2"><span>systemd 服务</span><input v-model="manualNodeForm.service" placeholder="如 sing-box.service；留空则只能刷新端口连接" /></label>
+          </div>
+          <p class="form-note manual-node-note">自动发现会优先读取 sing-box 配置；只有配置路径不标准、节点不是 sing-box 承载，或需要先手工纳入监控时才需要这里。</p>
+          <div class="modal-actions">
+            <button type="button" class="secondary-button" @click="manualNodeModalOpen = false">取消</button>
+            <button type="submit" class="primary-button" :disabled="busy || !manualNodeForm.serverId || !manualNodeForm.name || !manualNodeForm.listenPort">
+              <Loader2 v-if="busy" class="spin" :size="16" />
+              <Plus v-else :size="16" />
+              添加监控
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <section v-if="activePageTaskFeedback && activePageTaskCards.length" class="panel page-task-panel">
+        <div class="page-task-title">
+          <div>
+            <Terminal :size="17" />
+            <h3>{{ activePageTaskFeedback.title }}</h3>
+          </div>
+          <div class="page-task-actions">
+            <span class="task-count">{{ statusLabel(activePageTask.status) }}</span>
+            <button type="button" title="清除反馈" @click="clearPageTaskFeedback()"><X :size="15" /></button>
+          </div>
+        </div>
+        <div class="page-task-list">
+          <article v-for="job in activePageTaskCards" :key="job.id" class="page-task-item">
+            <div class="page-task-main">
+              <div class="task-main">
+                <Loader2 v-if="['queued', 'running'].includes(job.status)" class="spin" :size="16" />
+                <CircleAlert v-else-if="job.status === 'failed'" :size="16" />
+                <ShieldCheck v-else :size="16" />
+                <div>
+                  <strong>{{ job.title }}</strong>
+                  <small>{{ jobKindLabel(job.type) }} · {{ jobTime(job) }}</small>
+                </div>
+              </div>
+              <span :class="`pill status-${job.status || 'unknown'}`">{{ statusLabel(job.status) }}</span>
+            </div>
+            <p>{{ jobSummary(job) }}</p>
+            <details v-if="taskHasLogs(job)" class="page-task-log" :open="['running', 'failed'].includes(job.status)">
+              <summary>Hook 输出</summary>
+              <pre>{{ taskLogText(job) }}</pre>
+            </details>
+          </article>
+        </div>
+      </section>
 
       <section v-if="activePage === 'overview'" class="overview-page">
         <div class="overview-hero">
@@ -1774,7 +2286,7 @@ onUnmounted(() => {
           <div><Server :size="18" /><h2>服务器 hooks</h2></div>
         </div>
         <form class="server-install" @submit.prevent="installServer">
-          <p v-if="serverForm.id" class="form-note warning-note">正在升级/重装 {{ serverForm.name }} 的持久化 hook。SSH 凭据只用于这一次安装。</p>
+          <p v-if="serverForm.id" class="form-note warning-note">正在通过 SSH 重装 {{ serverForm.name }} 的持久化 hook；只有首次接入、hook 离线或旧 hook 不支持在线升级时才需要这条路径。</p>
           <div class="form-grid server-grid">
             <label><span>服务器名</span><input v-model="serverForm.name" required /></label>
             <label><span>服务器分组</span><input v-model="serverForm.group" placeholder="可选，如 Osaka / HK" /></label>
@@ -1785,11 +2297,11 @@ onUnmounted(() => {
             <label><span>Hook 端口</span><input v-model.number="serverForm.hookPort" type="number" /></label>
             <label><span>地区</span><input v-model="serverForm.location" placeholder="可选" /></label>
           </div>
-          <p class="form-note">SSH 凭据只用于这一次安装；安装完成后面板只保存 hook URL 与访问 token。</p>
+          <p class="form-note">SSH 凭据只用于 bootstrap 或离线恢复；hook 在线后可直接在服务器列表中执行在线升级。</p>
           <button class="primary-button" type="submit" :disabled="busy">
             <Loader2 v-if="busy" class="spin" :size="16" />
             <ShieldCheck v-else :size="16" />
-            {{ serverForm.id ? "升级/重装 hook" : "添加服务器并安装 hook" }}
+            {{ serverForm.id ? "通过 SSH 重装 hook" : "添加服务器并安装 hook" }}
           </button>
           <button v-if="serverForm.id" class="secondary-button" type="button" :disabled="busy" @click="resetServerForm">
             <X :size="15" />
@@ -1856,7 +2368,8 @@ onUnmounted(() => {
                         <button type="button" title="取消编辑" :disabled="busy" @click="cancelEditServer"><X :size="15" /></button>
                       </template>
                       <template v-else>
-                        <button type="button" title="升级/重装 hook" :disabled="busy" @click="prepareHookUpgrade(row.server)"><ShieldCheck :size="15" /></button>
+                        <button type="button" title="在线升级 hook" :disabled="busy || row.server.hookStatus !== 'online'" @click="upgradeHook(row.server)"><ShieldCheck :size="15" /></button>
+                        <button type="button" title="通过 SSH 重装 hook" :disabled="busy" @click="prepareHookUpgrade(row.server)"><RefreshCcw :size="15" /></button>
                         <button type="button" title="编辑服务器信息" :disabled="busy" @click="startEditServer(row.server)"><Pencil :size="15" /></button>
                         <button class="icon-warning" type="button" title="重启服务器" :disabled="busy || row.server.hookStatus !== 'online'" @click="rebootServer(row.server)"><RotateCw :size="15" /></button>
                         <button class="icon-danger" type="button" title="卸载 hook 并删除服务器" :disabled="busy || row.server.hookStatus === 'deleting'" @click="deleteServer(row.server)">
@@ -1885,7 +2398,7 @@ onUnmounted(() => {
           </button>
         </div>
         <form class="deploy-panel" @submit.prevent="submitDeployment">
-          <p v-if="editingNodeId" class="form-note warning-note">正在修改 {{ editingNodeName }}。保存后会通过目标服务器 hook 重新部署该节点；节点密码不会保存在面板中，需要重新输入。</p>
+          <p v-if="editingNodeId" class="form-note warning-note">正在修改 {{ editingNodeName }}。保存后会通过目标服务器 hook 重新部署该节点；节点密码、DNS Token 和混淆密码不会保存在面板中，需要重新输入。</p>
           <div class="form-grid">
             <label>
               <span>目标服务器</span>
@@ -2134,8 +2647,12 @@ onUnmounted(() => {
       <section v-if="activePage === 'nodes'" id="nodes" class="panel">
         <div class="section-title">
           <div><Wifi :size="18" /><h2>节点</h2></div>
+          <button class="secondary-button" type="button" :disabled="busy || !readyServers.length" @click="openManualNodeModal">
+            <Plus :size="15" />
+            添加监控
+          </button>
         </div>
-        <div v-if="!state.nodes.length" class="empty-state">还没有节点。先在 hook 已就绪的服务器上部署节点。</div>
+        <div v-if="!state.nodes.length" class="empty-state">还没有节点。可以先部署节点，或把已有 sing-box 节点手动加入监控。</div>
         <template v-else>
           <div class="list-toolbar">
             <label class="toggle-row compact-toggle">
@@ -2156,7 +2673,7 @@ onUnmounted(() => {
                   <td colspan="8"><strong>{{ row.label }}</strong><span>{{ row.count }} 个节点</span></td>
                 </tr>
                 <tr v-else>
-                  <td><strong>{{ row.node.name }}</strong><small>{{ row.node.protocol }}</small></td>
+                  <td><strong>{{ row.node.name }}</strong><small>{{ nodeProtocolLabel(row.node.protocol) }} · {{ nodeSourceLabel(row.node) }}</small></td>
                   <td><span class="group-badge">{{ groupLabel(row.node.group) }}</span></td>
                   <td>{{ serverName(row.node.serverId) }}</td>
                   <td>{{ row.node.endpoint }}</td>
@@ -2169,11 +2686,11 @@ onUnmounted(() => {
                   </td>
                   <td>
                     <div class="row-actions">
-                      <button type="button" title="修改节点参数" :disabled="busy || !readyServerIds.has(row.node.serverId)" @click="startEditNode(row.node)"><Pencil :size="15" /></button>
+                      <button v-if="isDeployableNode(row.node)" type="button" title="修改节点参数" :disabled="busy || !readyServerIds.has(row.node.serverId)" @click="startEditNode(row.node)"><Pencil :size="15" /></button>
                       <button type="button" title="刷新状态" :disabled="!readyServerIds.has(row.node.serverId)" @click="refreshNode(row.node)"><RefreshCcw :size="15" /></button>
-                      <button type="button" title="重启服务" :disabled="!readyServerIds.has(row.node.serverId)" @click="serviceNode(row.node, 'restart')"><RotateCw :size="15" /></button>
-                      <button class="icon-danger" type="button" title="卸载并删除节点" :disabled="busy || !readyServerIds.has(row.node.serverId) || row.node.status === 'deleting'" @click="deleteNode(row.node)"><Trash2 :size="15" /></button>
-                      <button class="icon-danger" type="button" title="强制清除本地节点记录" :disabled="busy" @click="forceClearNode(row.node)"><Eraser :size="15" /></button>
+                      <button type="button" title="重启服务" :disabled="!canControlNodeService(row.node)" @click="serviceNode(row.node, 'restart')"><RotateCw :size="15" /></button>
+                      <button v-if="isDeployableNode(row.node)" class="icon-danger" type="button" title="卸载并删除节点" :disabled="busy || !readyServerIds.has(row.node.serverId) || row.node.status === 'deleting'" @click="deleteNode(row.node)"><Trash2 :size="15" /></button>
+                      <button class="icon-danger" type="button" :title="row.node.monitorOnly ? '移除监控记录' : '强制清除本地节点记录'" :disabled="busy" @click="forceClearNode(row.node)"><Eraser :size="15" /></button>
                     </div>
                   </td>
                 </tr>
@@ -2327,6 +2844,55 @@ onUnmounted(() => {
             </table>
           </div>
         </template>
+      </section>
+
+      <section v-if="activePage === 'terminal'" id="terminal" class="panel terminal-page">
+        <div class="section-title">
+          <div><Terminal :size="18" /><h2>服务器终端</h2></div>
+          <div class="job-state">{{ activeTerminalSession.job?.status || "idle" }}</div>
+        </div>
+        <div class="terminal-controls">
+          <label>
+            <span>目标服务器</span>
+            <select v-model="terminalServerId" required>
+              <option value="" disabled>选择 hook 已就绪的服务器</option>
+              <option v-for="server in readyServers" :key="server.id" :value="server.id">{{ server.name }}</option>
+            </select>
+          </label>
+          <label>
+            <span>工作目录</span>
+            <input v-model="activeTerminalSession.cwd" placeholder="/root" :disabled="!terminalServerId" />
+          </label>
+          <label>
+            <span>超时秒数</span>
+            <input v-model.number="activeTerminalSession.timeoutSeconds" type="number" min="1" max="3600" :disabled="!terminalServerId" />
+          </label>
+          <div class="terminal-actions">
+            <button class="secondary-button" type="button" :disabled="!terminalServerId" @click="clearTerminal">
+              <Eraser :size="15" />
+              清屏
+            </button>
+          </div>
+        </div>
+        <div class="terminal-shell" @click="focusTerminalInput">
+          <div class="terminal-shell-head">
+            <span>{{ terminalServerId ? `${serverName(terminalServerId)} Terminal` : "Hook Terminal" }}</span>
+            <small>{{ terminalSessionRunning(activeTerminalSession) ? "running" : "ready" }}</small>
+          </div>
+          <pre ref="terminalOutputRef" class="terminal-output">{{ activeTerminalSession.output || "在下方提示符输入命令并按 Enter。" }}</pre>
+          <form class="terminal-input-line" @submit.prevent="runTerminalCommand">
+            <span class="terminal-prompt">{{ terminalPrompt(activeTerminalSession) }}</span>
+            <input
+              ref="terminalCommandInputRef"
+              v-model="activeTerminalSession.command"
+              autocomplete="off"
+              spellcheck="false"
+              :disabled="!terminalServerId || terminalSessionRunning(activeTerminalSession)"
+              @keydown.enter.exact.prevent="runTerminalCommand"
+            />
+            <Loader2 v-if="terminalSessionRunning(activeTerminalSession)" class="spin terminal-running-icon" :size="15" />
+          </form>
+        </div>
       </section>
 
       <section v-if="activePage === 'logs'" id="logs" class="panel">

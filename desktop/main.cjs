@@ -34,6 +34,7 @@ async function startApi() {
 
 async function createWindow() {
   const baseUrl = process.env.SIMPLEUI_DESKTOP_DEV === "1" ? "http://127.0.0.1:5173" : await startApi();
+  const allowedOrigin = new URL(baseUrl).origin;
   const win = new BrowserWindow({
     width: 1360,
     height: 900,
@@ -45,6 +46,10 @@ async function createWindow() {
       nodeIntegration: false,
       sandbox: true
     }
+  });
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  win.webContents.on("will-navigate", (event, url) => {
+    if (new URL(url).origin !== allowedOrigin) event.preventDefault();
   });
   await win.loadURL(baseUrl);
 }

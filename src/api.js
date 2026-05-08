@@ -51,6 +51,10 @@ export const api = {
       headers: jsonHeaders,
       body: JSON.stringify(payload)
     }),
+  upgradeHook: (id) =>
+    request(`/api/servers/${id}/hook/upgrade`, {
+      method: "POST"
+    }),
   forceClearServer: (id) =>
     request(`/api/servers/${id}?force=1`, {
       method: "DELETE"
@@ -79,6 +83,12 @@ export const api = {
       headers: jsonHeaders,
       body: JSON.stringify(payload)
     }),
+  createMonitorNode: (payload) =>
+    request("/api/nodes/monitors", {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify(payload)
+    }),
   refreshStatus: (payload) =>
     request("/api/hooks/status", {
       method: "POST",
@@ -99,6 +109,12 @@ export const api = {
     }),
   ipQuality: (payload) =>
     request("/api/hooks/ipquality", {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify(payload)
+    }),
+  runCommand: (payload) =>
+    request("/api/hooks/exec", {
       method: "POST",
       headers: jsonHeaders,
       body: JSON.stringify(payload)

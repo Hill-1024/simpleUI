@@ -3,6 +3,15 @@ uninstall_scope="${SIMPLEUI_UNINSTALL_SCOPE:-server}"
 target_protocol="${SIMPLEUI_PROTOCOL:-}"
 protocols=""
 
+if [ "${SIMPLEUI_MONITOR_ONLY:-0}" = "1" ]; then
+  cleanup_traffic_accounting() {
+    return 0
+  }
+  simpleui_log "Monitor-only node; remote proxy files will not be changed."
+  printf '__SIMPLEUI_RESULT__{"ok":true,"action":"monitor-remove","protocol":"%s"}\n' "$target_protocol"
+  exit 0
+fi
+
 if [ "$uninstall_scope" = "node" ]; then
   if [ -z "$target_protocol" ]; then
     simpleui_log "Node uninstall requires SIMPLEUI_PROTOCOL"
