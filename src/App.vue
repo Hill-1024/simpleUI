@@ -58,7 +58,7 @@ const pageDefinitions = [
   { id: "servers", title: "服务器管理", description: "添加服务器、安装或升级持久化 Hook，并维护服务器名称、分组与连接信息。" },
   { id: "deploy", title: "节点部署", description: "在 Hook 已就绪的服务器上部署或重新部署 Hysteria2 / Trojan 节点。" },
   { id: "nodes", title: "节点管理", description: "查看节点状态、资源同步结果，并把已有 sing-box 主流协议节点纳入监控。" },
-  { id: "connections", title: "连接统计与封禁", description: "按客户端 IP 查看流量，维护节点黑名单，并批量解封误封目标。" },
+  { id: "connections", title: "连接统计与封禁", description: "按客户端 IP 查看流量，维护节点黑名单，并支持按 IP 或节点分组查看。" },
   { id: "tools", title: "服务器工具", description: "执行性能优化和 IPQuality 双栈检测等 Hook 侧任务。" },
   { id: "terminal", title: "服务器终端", description: "通过已安装的持久化 Hook 在目标服务器上执行维护命令。" },
   { id: "logs", title: "任务日志", description: "查看当前任务的 Hook 输出，以及需要排障时的原始执行日志。" },
@@ -80,7 +80,8 @@ const releaseTargets = [
   { platform: "Linux", arch: "x64", packages: "deb / zip" }
 ];
 const selectedNodes = ref([]);
-const selectedBlacklistTargets = ref([]);
+const selectedBlacklistGroups = ref([]);
+const blacklistGroupMode = ref("target");
 const serversGrouped = ref(false);
 const nodesGrouped = ref(false);
 const banNodeModalOpen = ref(false);
@@ -231,6 +232,10 @@ const connectionSortOptions = [
   { value: "clientIp", label: "客户端 IP" },
   { value: "node", label: "节点名称" },
   { value: "protocol", label: "协议" }
+];
+const blacklistGroupModes = [
+  { value: "target", label: "按 IP 分组" },
+  { value: "node", label: "按节点分组" }
 ];
 
 const emptyTerminalSession = reactive({
@@ -527,19 +532,49 @@ const blacklistTargetRows = computed(() => {
 });
 const nodeBlacklistRows = computed(() =>
   state.nodes
-    .map((node) => ({
-      node,
-      entries: activeBlacklistEntries.value
+    .map((node) => {
+      const entries = activeBlacklistEntries.value
         .filter((entry) => entry.nodeId === node.id)
-        .sort((a, b) => String(a.target).localeCompare(String(b.target)))
-    }))
+        .sort((a, b) => String(a.target).localeCompare(String(b.target)));
+      return {
+        key: `node:${node.id}`,
+        title: node.name,
+        detail: `${serverName(node.serverId)} / ${nodeProtocolLabel(node.protocol)}`,
+        count: entries.length,
+        countLabel: `${entries.length} 个 IP`,
+        entries,
+        nodeIds: [node.id],
+        serverIds: node.serverId ? [node.serverId] : [],
+        targets: entries.map((entry) => entry.target),
+        updatedAt: blacklistRowLatest(entries),
+        actionLabel: "解封"
+      };
+    })
     .filter((row) => row.entries.length)
-    .sort((a, b) => serverName(a.node.serverId).localeCompare(serverName(b.node.serverId), "zh-Hans-CN") || a.node.name.localeCompare(b.node.name, "zh-Hans-CN"))
+    .sort((a, b) => serverName(a.serverIds[0]).localeCompare(serverName(b.serverIds[0]), "zh-Hans-CN") || a.title.localeCompare(b.title, "zh-Hans-CN"))
 );
-const selectedBlacklistRows = computed(() => {
-  const selected = new Set(selectedBlacklistTargets.value);
-  return blacklistTargetRows.value.filter((row) => selected.has(row.key));
+const blacklistRows = computed(() => {
+  if (blacklistGroupMode.value === "node") return nodeBlacklistRows.value;
+  return blacklistTargetRows.value.map((row) => ({
+    key: row.key,
+    title: row.target,
+    detail: row.ipFamily ? `IPv${row.ipFamily}` : "IP/CIDR",
+    count: row.nodeIds.length,
+    countLabel: `${row.nodeIds.length} 个节点`,
+    entries: row.entries,
+    nodeIds: row.nodeIds,
+    serverIds: row.serverIds,
+    targets: [row.target],
+    updatedAt: row.updatedAt,
+    actionLabel: "解封"
+  }));
 });
+const selectedBlacklistRows = computed(() => {
+  const selected = new Set(selectedBlacklistGroups.value);
+  return blacklistRows.value.filter((row) => selected.has(row.key));
+});
+const blacklistSelectionLabel = computed(() => (blacklistGroupMode.value === "node" ? "节点" : "IP"));
+const blacklistActiveModeLabel = computed(() => blacklistGroupModes.find((mode) => mode.value === blacklistGroupMode.value)?.label || "按 IP 分组");
 
 function fmtBytes(value = 0) {
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -993,7 +1028,7 @@ function clearRuntimeState() {
     monitorProtocols: []
   });
   selectedNodes.value = [];
-  selectedBlacklistTargets.value = [];
+  selectedBlacklistGroups.value = [];
   activeJob.value = null;
   jobLogs.value = [];
   toolFeedback.value = null;
@@ -1095,8 +1130,8 @@ async function load() {
   Object.assign(state, data);
   const currentNodeIds = new Set((data.nodes || []).map((node) => node.id));
   selectedNodes.value = selectedNodes.value.filter((id) => currentNodeIds.has(id));
-  const currentBlacklistTargets = new Set(blacklistTargetRows.value.map((row) => row.key));
-  selectedBlacklistTargets.value = selectedBlacklistTargets.value.filter((key) => currentBlacklistTargets.has(key));
+  const currentBlacklistGroups = new Set(blacklistRows.value.map((row) => row.key));
+  selectedBlacklistGroups.value = selectedBlacklistGroups.value.filter((key) => currentBlacklistGroups.has(key));
   if (!deployServerId.value && readyServers.value.length) {
     deployServerId.value = readyServers.value[0].id;
   }
@@ -1382,23 +1417,24 @@ function clearSelectedNodes() {
   selectedNodes.value = [];
 }
 
-function toggleBlacklistTarget(target, checked) {
-  const key = blacklistTargetKey(target);
+function toggleBlacklistGroup(key, checked) {
   if (!key) return;
   if (checked) {
-    if (!selectedBlacklistTargets.value.includes(key)) selectedBlacklistTargets.value = [...selectedBlacklistTargets.value, key];
+    if (!selectedBlacklistGroups.value.includes(key)) selectedBlacklistGroups.value = [...selectedBlacklistGroups.value, key];
     return;
   }
-  selectedBlacklistTargets.value = selectedBlacklistTargets.value.filter((item) => item !== key);
+  selectedBlacklistGroups.value = selectedBlacklistGroups.value.filter((item) => item !== key);
 }
 
-function selectAllBlacklistTargets() {
-  selectedBlacklistTargets.value = blacklistTargetRows.value.map((row) => row.key);
+function selectAllBlacklistGroups() {
+  selectedBlacklistGroups.value = blacklistRows.value.map((row) => row.key);
 }
 
-function clearSelectedBlacklistTargets() {
-  selectedBlacklistTargets.value = [];
+function clearSelectedBlacklistGroups() {
+  selectedBlacklistGroups.value = [];
 }
+
+watch(blacklistGroupMode, () => clearSelectedBlacklistGroups());
 
 function prepareHookUpgrade(server) {
   Object.assign(serverForm, {
@@ -1756,40 +1792,56 @@ async function runBan() {
   }
 }
 
-async function runUnban(target, nodeIds = []) {
-  const uniqueNodeIds = Array.from(new Set(nodeIds)).filter(Boolean);
-  if (!target || !uniqueNodeIds.length) return;
-  if (!window.confirm(`解封 ${target} 在 ${uniqueNodeIds.length} 个节点上的黑名单记录？`)) return;
-  busy.value = true;
-  try {
-    const result = await api.unblockSourceIp({
-      targetIp: target,
-      nodeIds: uniqueNodeIds
-    });
-    watchJobs(result.jobs, `批量解封客户端 IP ${target}`, { feedbackPage: "connections" });
-  } catch (error) {
-    busy.value = false;
-    showError(error);
+function blacklistUnbanRequests(rows = []) {
+  const buckets = new Map();
+  for (const row of rows) {
+    for (const entry of row.entries || []) {
+      const key = blacklistTargetKey(entry.target);
+      if (!key || !entry.nodeId) continue;
+      const bucket = buckets.get(key) || { target: entry.target, nodeIds: new Set() };
+      bucket.nodeIds.add(entry.nodeId);
+      buckets.set(key, bucket);
+    }
   }
+  return Array.from(buckets.values()).map((bucket) => ({
+    target: bucket.target,
+    nodeIds: Array.from(bucket.nodeIds)
+  }));
 }
 
-async function runSelectedUnban() {
-  const rows = selectedBlacklistRows.value;
-  if (!rows.length) return;
-  if (!window.confirm(`批量解封 ${rows.length} 个黑名单目标？`)) return;
+function blacklistRecordCount(rows = []) {
+  return blacklistUnbanRequests(rows).reduce((total, request) => total + request.nodeIds.length, 0);
+}
+
+function blacklistRowConfirmText(row) {
+  if (blacklistGroupMode.value === "node") {
+    return `解封节点 ${row.title} 上的 ${row.count} 个封禁 IP？`;
+  }
+  return `解封 IP ${row.title} 的 ${row.count} 条节点黑名单记录？`;
+}
+
+function blacklistRowJobTitle(row) {
+  return blacklistGroupMode.value === "node"
+    ? `解封节点 ${row.title} 的黑名单`
+    : `解封客户端 IP ${row.title}`;
+}
+
+async function runBlacklistUnbanRows(rows, title) {
+  const requests = blacklistUnbanRequests(rows);
+  if (!requests.length) return;
   busy.value = true;
   const jobs = [];
   try {
-    for (const row of rows) {
+    for (const request of requests) {
       const result = await api.unblockSourceIp({
-        targetIp: row.target,
-        nodeIds: row.nodeIds
+        targetIp: request.target,
+        nodeIds: request.nodeIds
       });
       jobs.push(...(result.jobs || []));
     }
-    selectedBlacklistTargets.value = [];
+    selectedBlacklistGroups.value = [];
     if (jobs.length) {
-      watchJobs(jobs, `批量解封 ${rows.length} 个黑名单目标`, { feedbackPage: "connections" });
+      watchJobs(jobs, title, { feedbackPage: "connections" });
     } else {
       busy.value = false;
       await load();
@@ -1798,6 +1850,20 @@ async function runSelectedUnban() {
     busy.value = false;
     showError(error);
   }
+}
+
+async function runBlacklistRowUnban(row) {
+  if (!row) return;
+  if (!window.confirm(blacklistRowConfirmText(row))) return;
+  await runBlacklistUnbanRows([row], blacklistRowJobTitle(row));
+}
+
+async function runSelectedUnban() {
+  const rows = selectedBlacklistRows.value;
+  if (!rows.length) return;
+  const recordCount = blacklistRecordCount(rows);
+  if (!window.confirm(`解封选中的 ${rows.length} 个${blacklistSelectionLabel.value}分组，共 ${recordCount} 条节点黑名单记录？`)) return;
+  await runBlacklistUnbanRows(rows, `解封选中的 ${rows.length} 个${blacklistSelectionLabel.value}分组`);
 }
 
 async function runOptimize() {
@@ -2877,59 +2943,57 @@ onUnmounted(() => {
           <div class="stats-title-row">
             <div>
               <h3 class="subsection-title">黑名单记录</h3>
-              <span class="filter-count">封禁 IP {{ blacklistTargetRows.length }} 个，节点记录 {{ activeBlacklistEntries.length }} 条</span>
+              <span class="filter-count">封禁 IP {{ blacklistTargetRows.length }} 个，节点记录 {{ activeBlacklistEntries.length }} 条，当前{{ blacklistActiveModeLabel }}</span>
             </div>
             <div class="blacklist-actions">
-              <button type="button" class="secondary-button" :disabled="!blacklistTargetRows.length" @click="selectAllBlacklistTargets">全选 IP</button>
-              <button type="button" class="secondary-button" :disabled="!selectedBlacklistTargets.length" @click="clearSelectedBlacklistTargets">清空</button>
-              <button type="button" class="danger-button" :disabled="!selectedBlacklistTargets.length" @click="runSelectedUnban">
-                <Eraser :size="16" />批量解封（{{ selectedBlacklistTargets.length }}）
+              <div class="segmented-control" role="group" aria-label="黑名单分组方式">
+                <button
+                  v-for="mode in blacklistGroupModes"
+                  :key="mode.value"
+                  type="button"
+                  :class="{ active: blacklistGroupMode === mode.value }"
+                  :aria-pressed="blacklistGroupMode === mode.value"
+                  @click="blacklistGroupMode = mode.value"
+                >
+                  {{ mode.label }}
+                </button>
+              </div>
+              <button type="button" class="secondary-button" :disabled="!blacklistRows.length" @click="selectAllBlacklistGroups">全选当前分组</button>
+              <button type="button" class="secondary-button" :disabled="!selectedBlacklistGroups.length" @click="clearSelectedBlacklistGroups">清空</button>
+              <button type="button" class="danger-button" :disabled="!selectedBlacklistGroups.length" @click="runSelectedUnban">
+                <Eraser :size="16" />解封选中（{{ selectedBlacklistGroups.length }}）
               </button>
             </div>
           </div>
-          <div v-if="!activeBlacklistEntries.length" class="empty-state">还没有同步到黑名单记录。封禁或刷新服务器状态后，这里会显示节点与封禁 IP 的双向统计。</div>
+          <div v-if="!activeBlacklistEntries.length" class="empty-state">还没有同步到黑名单记录。封禁或刷新服务器状态后，这里会显示已同步的节点黑名单。</div>
           <template v-else>
-            <h3 class="subsection-title">用户侧：封禁 IP -> 节点</h3>
             <div class="table-wrap compact-table stats-table-wrap">
               <table>
                 <thead>
                   <tr>
-                    <th>选择</th><th>封禁 IP/CIDR</th><th>节点数</th><th>服务器</th><th>节点</th><th>最近同步</th><th>操作</th>
+                    <th>选择</th>
+                    <th>{{ blacklistGroupMode === "node" ? "节点" : "封禁 IP/CIDR" }}</th>
+                    <th>{{ blacklistGroupMode === "node" ? "封禁数" : "节点数" }}</th>
+                    <th>服务器</th>
+                    <th>{{ blacklistGroupMode === "node" ? "封禁 IP" : "节点" }}</th>
+                    <th>最近同步</th>
+                    <th>操作</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="row in blacklistTargetRows" :key="row.key">
-                    <td><input type="checkbox" :checked="selectedBlacklistTargets.includes(row.key)" @change="toggleBlacklistTarget(row.target, $event.target.checked)" /></td>
-                    <td><strong>{{ row.target }}</strong><small v-if="row.ipFamily">IPv{{ row.ipFamily }}</small></td>
-                    <td>{{ row.nodeIds.length }}</td>
+                  <tr v-for="row in blacklistRows" :key="row.key">
+                    <td><input type="checkbox" :checked="selectedBlacklistGroups.includes(row.key)" @change="toggleBlacklistGroup(row.key, $event.target.checked)" /></td>
+                    <td><strong>{{ row.title }}</strong><small>{{ row.detail }}</small></td>
+                    <td>{{ row.countLabel }}</td>
                     <td>{{ blacklistServerLabel(row) }}</td>
-                    <td><span class="blacklist-node-list">{{ blacklistNodeLabel(row) }}</span></td>
-                    <td>{{ fmtTime(row.updatedAt) }}</td>
-                    <td><button type="button" class="danger-text" @click="runUnban(row.target, row.nodeIds)">解封全部节点</button></td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            <h3 class="subsection-title">节点侧：节点 -> 封禁 IP</h3>
-            <div class="table-wrap compact-table stats-table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>节点</th><th>服务器</th><th>封禁 IP</th><th>数量</th><th>最近同步</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="row in nodeBlacklistRows" :key="row.node.id">
-                    <td><strong>{{ row.node.name }}</strong><small>{{ nodeProtocolLabel(row.node.protocol) }}</small></td>
-                    <td>{{ serverName(row.node.serverId) }}</td>
                     <td>
-                      <div class="blacklist-target-list">
-                        <span v-for="entry in row.entries" :key="`${row.node.id}-${entry.target}`" class="blacklist-target-chip">{{ entry.target }}</span>
+                      <div v-if="blacklistGroupMode === 'node'" class="blacklist-chip-list">
+                        <span v-for="target in row.targets" :key="`${row.key}-${target}`" class="blacklist-chip">{{ target }}</span>
                       </div>
+                      <span v-else class="blacklist-node-list">{{ blacklistNodeLabel(row) }}</span>
                     </td>
-                    <td>{{ row.entries.length }}</td>
-                    <td>{{ fmtTime(blacklistRowLatest(row.entries)) }}</td>
+                    <td>{{ fmtTime(row.updatedAt) }}</td>
+                    <td><button type="button" class="danger-text" @click="runBlacklistRowUnban(row)">{{ row.actionLabel }}</button></td>
                   </tr>
                 </tbody>
               </table>

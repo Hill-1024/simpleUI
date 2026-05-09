@@ -1676,14 +1676,14 @@ td small {
   white-space: nowrap;
 }
 
-.blacklist-target-list {
+.blacklist-chip-list {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   max-width: 520px;
 }
 
-.blacklist-target-chip {
+.blacklist-chip {
   display: inline-flex;
   align-items: center;
   min-height: 24px;
@@ -1698,6 +1698,32 @@ td small {
   border-radius: 999px;
   font-size: 12px;
   font-weight: 700;
+}
+
+.segmented-control {
+  display: inline-grid;
+  grid-auto-flow: column;
+  align-items: center;
+  padding: 3px;
+  background: #edf3f1;
+  border: 1px solid #dce7e3;
+  border-radius: 8px;
+}
+
+.segmented-control button {
+  min-height: 32px;
+  padding: 0 11px;
+  color: #52615c;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  font-weight: 800;
+}
+
+.segmented-control button.active {
+  color: var(--text);
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(30, 45, 40, 0.08);
 }
 
 .stats-title-row {
@@ -2203,10 +2229,16 @@ td small {
   }
 
   .ban-panel > *,
+  .segmented-control,
   .blacklist-actions > *,
   .topbar-actions > * {
     width: 100%;
     min-width: 0;
+  }
+
+  .segmented-control {
+    grid-auto-flow: row;
+    grid-template-columns: 1fr 1fr;
   }
 
   .blacklist-actions {
