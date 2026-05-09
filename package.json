@@ -57,13 +57,18 @@
     "appId": "dev.simpleui.node-orchestrator",
     "productName": "SimpleUI",
     "npmRebuild": false,
+    "directories": {
+      "buildResources": "build"
+    },
     "files": [
       "dist/**/*",
       "server/**/*",
       "desktop/**/*",
+      "build/icon.png",
       "package.json"
     ],
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         "nsis",
         "zip"
@@ -71,6 +76,7 @@
       "artifactName": "${productName}_${version}_Windows_${arch}.${ext}"
     },
     "mac": {
+      "icon": "build/icon.icns",
       "target": [
         "dmg",
         "zip"
@@ -78,6 +84,7 @@
       "artifactName": "${productName}_${version}_macOS_${arch}.${ext}"
     },
     "linux": {
+      "icon": "build/icon.png",
       "category": "Network",
       "maintainer": "Hill-1024 <3520363913@qq.com>",
       "target": [
