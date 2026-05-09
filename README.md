@@ -1,6 +1,12 @@
+<p align="center">
+  <img src="./build/icon.png" alt="SimpleUI icon" width="96" />
+</p>
+
 # SimpleUI Node Console
 
 中文 | [English](./README.en.md) | [日本語](./README.ja.md)
+
+**Demo:** 待部署完成后填写
 
 SimpleUI 是一个面向多服务器代理节点运维的轻量 WebUI。它把服务器接入、Hysteria2/Trojan 部署、节点状态同步、客户端封禁、远程工具执行、终端维护和 hook 升级放在同一套控制面板里，目标是让个人或小团队可以用清晰、可审计的流程管理分散在不同机器上的节点。
 
