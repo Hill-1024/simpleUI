@@ -61,7 +61,7 @@
       "buildResources": "build"
     },
     "files": [
-      "dist/**/*",
+      "dist/client/**/*",
       "server/**/*",
       "desktop/**/*",
       "build/icon.png",
