@@ -6,7 +6,7 @@
 
 [中文](./README.md) | English | [日本語](./README.ja.md)
 
-**Demo:** To be filled after deployment.
+[**Demo** ](https://simpleui-32n.pages.dev/#overview)
 
 SimpleUI is a lightweight WebUI for operating proxy nodes across multiple servers. It brings server onboarding, Hysteria2/Trojan deployment, node status synchronization, client IP blocking, remote tools, terminal access, and hook upgrades into one control plane so a personal operator or small team can manage distributed nodes with a clear and auditable workflow.
 

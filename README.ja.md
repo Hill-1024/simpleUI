@@ -6,7 +6,7 @@
 
 [中文](./README.md) | [English](./README.en.md) | 日本語
 
-**Demo:** デプロイ完了後に追記します。
+[**Demo** ](https://simpleui-32n.pages.dev/#overview)
 
 SimpleUI は、複数サーバー上のプロキシノードを運用するための軽量 WebUI です。サーバー登録、Hysteria2/Trojan のデプロイ、ノード状態の同期、クライアント IP のブロック、リモートツール、ターミナル操作、hook のアップグレードを一つの管理画面にまとめ、個人または小規模チームが分散したノードを見通しよく管理できるようにします。
 
