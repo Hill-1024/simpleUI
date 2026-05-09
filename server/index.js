@@ -1078,14 +1078,63 @@ app.post("/api/hooks/ban", async (req, res) => {
   }
 
   await mutateDb((db) => {
-    db.bans.push(stamp({
-      targetKind: "source-ip",
-      target: data.targetIp,
-      ipFamily: normalizedTarget.family,
-      nodeIds: requestedNodeIds,
-      status: "active"
-    }, true));
-    appendAudit(db, "ban.create", `Block source IP ${data.targetIp} on ${requestedNodeIds.length} node(s)`);
+    appendAudit(db, "ban.create.request", `Block source IP ${data.targetIp} on ${requestedNodeIds.length} node(s)`);
+  });
+  res.status(202).json({ jobs });
+});
+
+app.post("/api/hooks/unban", async (req, res) => {
+  const schema = z.object({
+    targetIp: z.string().min(1),
+    nodeIds: z.array(z.string()).min(1)
+  });
+  const data = parseBody(schema, req, res);
+  if (!data) return;
+  const normalizedTarget = normalizeIpTarget(data.targetIp);
+  if (!normalizedTarget) {
+    res.status(400).json({ error: "targetIp must be an IPv4, IPv6, IPv4 CIDR, or IPv6 CIDR target" });
+    return;
+  }
+  data.targetIp = normalizedTarget.value;
+  const state = await loadDb();
+  const requestedNodeIds = Array.from(new Set(data.nodeIds));
+  const nodes = state.nodes.filter((node) => requestedNodeIds.includes(node.id));
+  if (!nodes.length) {
+    res.status(404).json({ error: "No nodes selected" });
+    return;
+  }
+  if (nodes.length !== requestedNodeIds.length) {
+    res.status(404).json({ error: "One or more selected nodes were not found" });
+    return;
+  }
+
+  const jobs = [];
+  for (const node of nodes) {
+    const server = state.servers.find((item) => item.id === node.serverId);
+    if (!server) {
+      res.status(404).json({ error: `Server for node ${node.name} not found` });
+      return;
+    }
+    if (server.hookStatus !== "online") {
+      res.status(409).json({ error: `${server.name} hook is not ready` });
+      return;
+    }
+    const job = await runRemoteAction({
+      type: "unban",
+      remoteAction: "ban",
+      title: `Unblock source IP ${data.targetIp} on ${node.name}`,
+      server,
+      node,
+      extra: {
+        SIMPLEUI_BAN_IP: data.targetIp,
+        SIMPLEUI_BAN_ACTION: "unban"
+      }
+    });
+    jobs.push(job);
+  }
+
+  await mutateDb((db) => {
+    appendAudit(db, "ban.remove.request", `Unblock source IP ${data.targetIp} on ${requestedNodeIds.length} node(s)`);
   });
   res.status(202).json({ jobs });
 });

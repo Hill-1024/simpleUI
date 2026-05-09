@@ -369,6 +369,94 @@ def read_json_file(path):
     except Exception:
         return None
 
+def normalize_blacklist_target(raw):
+    try:
+        import ipaddress
+        text = str(raw or "").strip()
+        if not text:
+            return None
+        parsed = ipaddress.ip_network(text, strict=False) if "/" in text else ipaddress.ip_address(text)
+        if getattr(parsed, "ipv4_mapped", None):
+            parsed = parsed.ipv4_mapped
+        elif hasattr(parsed, "network_address") and getattr(parsed.network_address, "ipv4_mapped", None) and parsed.prefixlen >= 96:
+            parsed = ipaddress.ip_network(f"{parsed.network_address.ipv4_mapped}/{parsed.prefixlen - 96}", strict=False)
+        return {"target": str(parsed), "ipFamily": parsed.version}
+    except Exception:
+        return None
+
+def read_legacy_blacklist_targets():
+    targets = []
+    try:
+        with open("/etc/simpleui/banned-source-ips.txt", "r", encoding="utf-8", errors="ignore") as handle:
+            for line in handle:
+                normalized = normalize_blacklist_target(line.strip())
+                if normalized:
+                    targets.append(normalized)
+    except Exception:
+        pass
+    unique = {}
+    for item in targets:
+        unique[item["target"]] = item
+    return list(unique.values())
+
+def discover_blacklists(discovered_nodes):
+    records = []
+    seen = set()
+    data = read_json_file("/etc/simpleui/source-ip-blacklist.json")
+    nodes = data.get("nodes") if isinstance(data, dict) and isinstance(data.get("nodes"), dict) else {}
+    for remote_key, node_entry in nodes.items():
+        if not isinstance(node_entry, dict):
+            continue
+        targets = node_entry.get("targets") if isinstance(node_entry.get("targets"), dict) else {}
+        for target_key, target_entry in targets.items():
+            entry = target_entry if isinstance(target_entry, dict) else {"target": target_key}
+            if str(entry.get("status") or "active") not in {"active", "pending"}:
+                continue
+            normalized = normalize_blacklist_target(entry.get("target") or target_key)
+            if not normalized:
+                continue
+            key = (str(node_entry.get("remoteKey") or remote_key), normalized["target"])
+            seen.add(key)
+            records.append({
+                "remoteKey": key[0],
+                "protocol": node_entry.get("protocol", ""),
+                "service": node_entry.get("service", ""),
+                "serviceProtocol": node_entry.get("serviceProtocol", ""),
+                "configPath": node_entry.get("configPath", ""),
+                "listenPort": node_entry.get("listenPort"),
+                "nodeName": node_entry.get("nodeName", ""),
+                "target": normalized["target"],
+                "ipFamily": normalized["ipFamily"],
+                "targetKind": "source-ip",
+                "source": "simpleui",
+                "createdAt": entry.get("createdAt"),
+                "updatedAt": entry.get("updatedAt"),
+            })
+
+    legacy_targets = read_legacy_blacklist_targets()
+    for node in discovered_nodes:
+        remote_key = str(node.get("remoteKey") or "").strip()
+        if not remote_key:
+            continue
+        for target in legacy_targets:
+            key = (remote_key, target["target"])
+            if key in seen:
+                continue
+            records.append({
+                "remoteKey": remote_key,
+                "protocol": node.get("protocol", ""),
+                "service": node.get("service", ""),
+                "serviceProtocol": node.get("serviceProtocol", ""),
+                "configPath": node.get("configPath", ""),
+                "listenPort": node.get("listenPort"),
+                "nodeName": node.get("name", ""),
+                "target": target["target"],
+                "ipFamily": target["ipFamily"],
+                "targetKind": "source-ip",
+                "source": "legacy-server",
+            })
+    return records
+
 def systemd_exec_configs(service):
     configs = []
     if not service:
@@ -555,6 +643,7 @@ def discover_nodes():
     nodes.extend(discover_sing_box_nodes(skip_pairs))
     return nodes
 
+discovered_nodes = discover_nodes()
 load1, load5, load15 = os.getloadavg() if hasattr(os, "getloadavg") else (0, 0, 0)
 payload = {
     "hostname": socket.gethostname(),
@@ -573,7 +662,8 @@ payload = {
     "filesystems": filesystems(),
     "network": network(),
     "managedServices": managed_services(),
-    "discoveredNodes": discover_nodes(),
+    "discoveredNodes": discovered_nodes,
+    "blacklists": discover_blacklists(discovered_nodes),
 }
 print("__SIMPLEUI_SERVER_STATUS__" + json.dumps(payload, ensure_ascii=False))
 PY

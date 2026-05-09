@@ -125,6 +125,12 @@ export const api = {
       headers: jsonHeaders,
       body: JSON.stringify(payload)
     }),
+  unblockSourceIp: (payload) =>
+    request("/api/hooks/unban", {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify(payload)
+    }),
   job: (id) => request(`/api/jobs/${id}`),
   clearJobs: () =>
     request("/api/jobs", {

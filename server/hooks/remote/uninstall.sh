@@ -56,35 +56,118 @@ cleanup_traffic_accounting() {
 
 cleanup_bans() {
   simpleui_log "Cleaning SimpleUI firewall DROP rules"
-  if [ -f /etc/simpleui/banned-source-ips.txt ]; then
-    while IFS= read -r source_ip; do
-      [ -z "$source_ip" ] && continue
-      family="$(python3 - "$source_ip" <<'PY'
+  emit_blacklist_rows() {
+    python3 <<'PY'
 import ipaddress
+import json
+import os
 import sys
-raw = sys.argv[1].strip()
+
+def normalize(raw):
+    try:
+        text = str(raw or "").strip()
+        if not text:
+            return None
+        parsed = ipaddress.ip_network(text, strict=False) if "/" in text else ipaddress.ip_address(text)
+        if isinstance(parsed, ipaddress.IPv6Address) and parsed.ipv4_mapped:
+            parsed = parsed.ipv4_mapped
+        elif isinstance(parsed, ipaddress.IPv6Network) and parsed.network_address.ipv4_mapped and parsed.prefixlen >= 96:
+            parsed = ipaddress.ip_network(f"{parsed.network_address.ipv4_mapped}/{parsed.prefixlen - 96}", strict=False)
+        return str(parsed), parsed.version
+    except Exception:
+        return None
+
+def protocols(raw, protocol):
+    values = []
+    for part in str(raw or "").replace("/", ",").replace(" ", ",").split(","):
+        if part in {"tcp", "udp"} and part not in values:
+            values.append(part)
+    if values:
+        return ",".join(values)
+    return "udp" if protocol in {"hysteria2", "hysteria", "tuic", "wireguard"} else "tcp"
+
+rows = []
 try:
-    parsed = ipaddress.ip_network(raw, strict=False) if "/" in raw else ipaddress.ip_address(raw)
-except ValueError:
-    raise SystemExit(0)
-if isinstance(parsed, ipaddress.IPv6Address) and parsed.ipv4_mapped:
-    parsed = parsed.ipv4_mapped
-elif isinstance(parsed, ipaddress.IPv6Network) and parsed.network_address.ipv4_mapped and parsed.prefixlen >= 96:
-    parsed = ipaddress.ip_network(f"{parsed.network_address.ipv4_mapped}/{parsed.prefixlen - 96}", strict=False)
-print(parsed.version)
+    with open("/etc/simpleui/source-ip-blacklist.json", "r", encoding="utf-8") as handle:
+        data = json.load(handle)
+except Exception:
+    data = {}
+
+nodes = data.get("nodes") if isinstance(data, dict) and isinstance(data.get("nodes"), dict) else {}
+for node in nodes.values():
+    if not isinstance(node, dict):
+        continue
+    targets = node.get("targets") if isinstance(node.get("targets"), dict) else {}
+    for key, entry in targets.items():
+        entry = entry if isinstance(entry, dict) else {"target": key}
+        normalized = normalize(entry.get("target") or key)
+        if not normalized:
+            continue
+        target, family = normalized
+        rows.append((target, family, str(node.get("listenPort") or ""), protocols(node.get("serviceProtocol", ""), node.get("protocol", ""))))
+
+try:
+    with open("/etc/simpleui/banned-source-ips.txt", "r", encoding="utf-8", errors="ignore") as handle:
+        for line in handle:
+            normalized = normalize(line.strip())
+            if normalized:
+                target, family = normalized
+                rows.append((target, family, "", "tcp,udp"))
+except Exception:
+    pass
+
+seen = set()
+for target, family, port, protocol_list in rows:
+    key = (target, family, port, protocol_list)
+    if key in seen:
+        continue
+    seen.add(key)
+    print(f"{family}|{target}|{port}|{protocol_list}")
 PY
-)"
-      if [ "$family" = "6" ]; then
-        while ip6tables -C INPUT -s "$source_ip" -j DROP >/dev/null 2>&1; do
-          ip6tables -D INPUT -s "$source_ip" -j DROP >/dev/null 2>&1 || break
+  }
+
+  remove_nft_rules() {
+    local family="$1"
+    local source_ip="$2"
+    local node_port="$3"
+    local proto="$4"
+    local family_expr="ip saddr"
+    [ "$family" = "6" ] && family_expr="ip6 saddr"
+    command -v nft >/dev/null 2>&1 || return 0
+    nft -a list chain inet simpleui input 2>/dev/null \
+      | awk -v family_expr="$family_expr" -v source="$source_ip" -v proto="$proto" -v port="$node_port" '
+          index($0, family_expr " " source) &&
+          (port == "" || index($0, "dport " port)) &&
+          (port == "" || index($0, proto)) { print $NF }
+        ' \
+      | while IFS= read -r handle; do
+          [ -n "$handle" ] && nft delete rule inet simpleui input handle "$handle" >/dev/null 2>&1 || true
         done
-      elif [ "$family" = "4" ]; then
-        while iptables -C INPUT -s "$source_ip" -j DROP >/dev/null 2>&1; do
-          iptables -D INPUT -s "$source_ip" -j DROP >/dev/null 2>&1 || break
+  }
+
+  while IFS='|' read -r family source_ip node_port protocols; do
+    [ -n "$source_ip" ] || continue
+    tool=""
+    if [ "$family" = "6" ] && command -v ip6tables >/dev/null 2>&1; then
+      tool="ip6tables"
+    elif [ "$family" = "4" ] && command -v iptables >/dev/null 2>&1; then
+      tool="iptables"
+    fi
+    printf '%s' "$protocols" | tr ',' '\n' | while IFS= read -r proto; do
+      [ "$proto" = "tcp" ] || [ "$proto" = "udp" ] || continue
+      if [ -n "$tool" ] && [ -n "$node_port" ]; then
+        while "$tool" -C INPUT -p "$proto" --dport "$node_port" -s "$source_ip" -j DROP >/dev/null 2>&1; do
+          "$tool" -D INPUT -p "$proto" --dport "$node_port" -s "$source_ip" -j DROP >/dev/null 2>&1 || break
         done
       fi
-    done < /etc/simpleui/banned-source-ips.txt
-  fi
+      remove_nft_rules "$family" "$source_ip" "$node_port" "$proto"
+    done
+    if [ -n "$tool" ]; then
+      while "$tool" -C INPUT -s "$source_ip" -j DROP >/dev/null 2>&1; do
+        "$tool" -D INPUT -s "$source_ip" -j DROP >/dev/null 2>&1 || break
+      done
+    fi
+  done < <(emit_blacklist_rows)
   nft delete table inet simpleui >/dev/null 2>&1 || true
   simpleui_save_firewall
 }

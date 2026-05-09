@@ -1,4 +1,4 @@
-const storageKey = "simpleui.demo.state.v1";
+const storageKey = "simpleui.demo.state.v2";
 const jobsById = new Map();
 
 const gb = (value) => Math.round(value * 1024 * 1024 * 1024);
@@ -192,16 +192,9 @@ function seedState() {
       traffic("rt-5", "node-vless-fra", "198.51.100.77", 4, ["tcp"], gb(27), gb(4), 5)
     ],
     bans: [
-      {
-        id: "ban-demo-1",
-        targetKind: "source-ip",
-        target: "203.0.113.66",
-        ipFamily: 4,
-        nodeIds: ["node-hy2-tokyo", "node-trojan-tokyo"],
-        status: "active",
-        createdAt: ago(180),
-        updatedAt: ago(180)
-      }
+      blacklist("ban-demo-1", "node-hy2-tokyo", "203.0.113.66", 180),
+      blacklist("ban-demo-2", "node-trojan-tokyo", "203.0.113.66", 180),
+      blacklist("ban-demo-3", "node-ss-sg", "2001:db8:54::88", 96)
     ],
     jobs: [
       completedJob("job-seed-status", "status", "Refresh JP HY2 443", "客户端 4，客户端 IP 2", 7),
@@ -225,6 +218,10 @@ function demoNode(idValue, serverId, protocol, name, group, endpoint, listenPort
     endpoint,
     domain: endpoint.split(":")[0],
     listenPort,
+    configPath: monitorOnly ? "/etc/sing-box/config.json" : (protocol === "trojan" ? "/usr/src/trojan/server.conf" : "/etc/hysteria/config.yaml"),
+    remoteKey: monitorOnly
+      ? `sing-box:/etc/sing-box/config.json:inbound:${idValue}:${listenPort}`
+      : `${protocol}:${protocol === "trojan" ? "/usr/src/trojan/server.conf" : "/etc/hysteria/config.yaml"}:${listenPort}`,
     tlsMode: protocol === "hysteria2" ? "acme-http" : "acme-http",
     acmeEmail: "admin@demo.simpleui.dev",
     masqueradeUrl: "https://www.bing.com/",
@@ -277,6 +274,39 @@ function traffic(idValue, nodeId, clientIp, family, protocols, rx, tx, connectio
     connections,
     lastSeenAt: ago(2),
     updatedAt: ago(2)
+  };
+}
+
+function seedNodeMeta(nodeId) {
+  const values = {
+    "node-hy2-tokyo": { serverId: "srv-tokyo", protocol: "hysteria2", listenPort: 443, configPath: "/etc/hysteria/config.yaml" },
+    "node-trojan-tokyo": { serverId: "srv-tokyo", protocol: "trojan", listenPort: 443, configPath: "/usr/src/trojan/server.conf" },
+    "node-ss-sg": { serverId: "srv-sg", protocol: "shadowsocks", listenPort: 8388, configPath: "/etc/sing-box/config.json" },
+    "node-vless-fra": { serverId: "srv-fra", protocol: "vless", listenPort: 443, configPath: "/etc/sing-box/config.json" },
+    "node-hy2-la": { serverId: "srv-la", protocol: "hysteria2", listenPort: 8443, configPath: "/etc/hysteria/config.yaml" }
+  };
+  return values[nodeId] || {};
+}
+
+function blacklist(idValue, nodeId, target, minutes = 5, nodeOverride = null) {
+  const node = nodeOverride || seedNodeMeta(nodeId);
+  const remoteKey = node.remoteKey || (String(node.configPath || "").includes("sing-box")
+    ? `sing-box:${node.configPath}:inbound:${nodeId}:${node.listenPort || ""}`
+    : `${node.protocol || "demo"}:${node.configPath || "managed"}:${node.listenPort || ""}`);
+  return {
+    id: idValue,
+    targetKind: "source-ip",
+    target,
+    ipFamily: target.includes(":") ? 6 : 4,
+    serverId: node.serverId || "",
+    nodeId,
+    remoteKey,
+    status: "active",
+    source: "demo",
+    remoteCreatedAt: ago(minutes),
+    lastSeenAt: ago(Math.min(minutes, 2)),
+    createdAt: ago(minutes),
+    updatedAt: ago(Math.min(minutes, 2))
   };
 }
 
@@ -597,6 +627,45 @@ function terminalResult(command = "") {
   };
 }
 
+function upsertDemoBlacklist(nodeId, target) {
+  const node = findNode(nodeId);
+  if (!node) return null;
+  const existing = state.bans.find((item) =>
+    item.nodeId === nodeId &&
+    String(item.target || "").toLowerCase() === String(target || "").toLowerCase()
+  );
+  const next = blacklist(existing?.id || id("ban"), nodeId, target, 0, node);
+  if (existing) {
+    Object.assign(existing, {
+      ...next,
+      createdAt: existing.createdAt,
+      remoteCreatedAt: existing.remoteCreatedAt || next.remoteCreatedAt,
+      status: "active"
+    });
+    return existing;
+  }
+  state.bans.unshift(next);
+  return next;
+}
+
+function removeDemoBlacklist(nodeId, target) {
+  const timestamp = now();
+  let removed = false;
+  for (const item of state.bans) {
+    if (
+      item.nodeId === nodeId &&
+      String(item.target || "").toLowerCase() === String(target || "").toLowerCase() &&
+      item.status !== "removed"
+    ) {
+      item.status = "removed";
+      item.removedAt = timestamp;
+      item.updatedAt = timestamp;
+      removed = true;
+    }
+  }
+  return removed;
+}
+
 export const api = {
   session: () => respond({ authRequired: false, authenticated: true, demo: true }),
   login: () => respond({ ok: true, authenticated: true }),
@@ -669,9 +738,12 @@ export const api = {
       title: `Delete ${serverName(serverId)}`,
       logs: ["[demo] stopping managed services\n", "[demo] removing SimpleUI hook\n", "[demo] pruning local metadata\n"],
       complete: () => {
+        const removedNodeIds = new Set(state.nodes.filter((node) => node.serverId === serverId).map((node) => node.id));
         state.nodes = state.nodes.filter((node) => node.serverId !== serverId);
         state.servers = state.servers.filter((item) => item.id !== serverId);
         state.connections = state.connections.filter((item) => item.serverId !== serverId);
+        state.remoteTraffic = state.remoteTraffic.filter((item) => !removedNodeIds.has(item.nodeId));
+        state.bans = state.bans.filter((item) => item.serverId !== serverId && !removedNodeIds.has(item.nodeId));
         saveState();
         return { ok: true };
       }
@@ -681,10 +753,12 @@ export const api = {
     return respond({ job, server });
   },
   forceClearServer: async (serverId) => {
+    const removedNodeIds = new Set(state.nodes.filter((node) => node.serverId === serverId).map((node) => node.id));
     state.nodes = state.nodes.filter((node) => node.serverId !== serverId);
     state.servers = state.servers.filter((server) => server.id !== serverId);
     state.connections = state.connections.filter((item) => item.serverId !== serverId);
-    state.remoteTraffic = state.remoteTraffic.filter((item) => findNode(item.nodeId));
+    state.remoteTraffic = state.remoteTraffic.filter((item) => !removedNodeIds.has(item.nodeId));
+    state.bans = state.bans.filter((item) => item.serverId !== serverId && !removedNodeIds.has(item.nodeId));
     saveState();
     return respond({ ok: true, force: true });
   },
@@ -782,6 +856,9 @@ export const api = {
     const node = findNode(nodeId);
     if (node?.monitorOnly) {
       state.nodes = state.nodes.filter((item) => item.id !== nodeId);
+      state.connections = state.connections.filter((item) => item.nodeId !== nodeId);
+      state.remoteTraffic = state.remoteTraffic.filter((item) => item.nodeId !== nodeId);
+      state.bans = state.bans.filter((item) => item.nodeId !== nodeId);
       saveState();
       return respond({ ok: true, monitorOnly: true });
     }
@@ -794,6 +871,7 @@ export const api = {
         state.nodes = state.nodes.filter((item) => item.id !== nodeId);
         state.connections = state.connections.filter((item) => item.nodeId !== nodeId);
         state.remoteTraffic = state.remoteTraffic.filter((item) => item.nodeId !== nodeId);
+        state.bans = state.bans.filter((item) => item.nodeId !== nodeId);
         saveState();
         return { ok: true };
       }
@@ -805,6 +883,7 @@ export const api = {
     state.nodes = state.nodes.filter((node) => node.id !== nodeId);
     state.connections = state.connections.filter((item) => item.nodeId !== nodeId);
     state.remoteTraffic = state.remoteTraffic.filter((item) => item.nodeId !== nodeId);
+    state.bans = state.bans.filter((item) => item.nodeId !== nodeId);
     saveState();
     return respond({ ok: true, force: true });
   },
@@ -841,19 +920,32 @@ export const api = {
   blockSourceIp: async (payload = {}) => {
     const nodeIds = Array.from(new Set(payload.nodeIds || []));
     const target = payload.targetIp || "203.0.113.66";
-    state.bans.unshift(stamp({
-      id: id("ban"),
-      targetKind: "source-ip",
-      target,
-      ipFamily: target.includes(":") ? 6 : 4,
-      nodeIds,
-      status: "active"
-    }, true));
+    for (const nodeId of nodeIds) upsertDemoBlacklist(nodeId, target);
     const jobs = nodeIds.map((nodeId) => createJob({
       type: "ban",
       title: `Block source IP ${target} on ${nodeName(nodeId)}`,
       logs: [`[demo] validating ${target}\n`, `[demo] writing nftables DROP rule for ${nodeName(nodeId)}\n`, "[demo] rule active in simulated firewall\n"],
-      complete: () => ({ ok: true, targetIp: target, nodeId })
+      complete: () => {
+        const entry = upsertDemoBlacklist(nodeId, target);
+        saveState();
+        return { ok: true, action: "ban", target, ipFamily: target.includes(":") ? 6 : 4, nodeId, remoteKey: entry?.remoteKey };
+      }
+    }));
+    saveState();
+    return respond({ jobs });
+  },
+  unblockSourceIp: async (payload = {}) => {
+    const nodeIds = Array.from(new Set(payload.nodeIds || []));
+    const target = payload.targetIp || "203.0.113.66";
+    const jobs = nodeIds.map((nodeId) => createJob({
+      type: "unban",
+      title: `Unblock source IP ${target} on ${nodeName(nodeId)}`,
+      logs: [`[demo] validating ${target}\n`, `[demo] removing firewall DROP rule for ${nodeName(nodeId)}\n`, "[demo] blacklist entry removed from simulated node store\n"],
+      complete: () => {
+        removeDemoBlacklist(nodeId, target);
+        saveState();
+        return { ok: true, action: "unban", target, ipFamily: target.includes(":") ? 6 : 4, nodeId };
+      }
     }));
     saveState();
     return respond({ jobs });

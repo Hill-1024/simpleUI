@@ -1655,6 +1655,51 @@ td small {
   font-size: 12px;
 }
 
+.blacklist-section {
+  display: grid;
+  gap: 12px;
+  margin: 14px 0 18px;
+}
+
+.blacklist-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.blacklist-node-list {
+  display: block;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.blacklist-target-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 520px;
+}
+
+.blacklist-target-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  max-width: 220px;
+  padding: 0 9px;
+  overflow: hidden;
+  color: #40504b;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: #edf3f1;
+  border: 1px solid #dce7e3;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .stats-title-row {
   display: flex;
   align-items: center;
@@ -2025,10 +2070,14 @@ td small {
   .sidebar {
     position: relative;
     height: auto;
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
   }
 
   .sidebar nav {
     grid-template-columns: repeat(8, max-content);
+    max-width: 100%;
     overflow-x: auto;
   }
 
@@ -2108,6 +2157,11 @@ td small {
 }
 
 @media (max-width: 760px) {
+  body {
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
   main {
     padding: 16px;
   }
@@ -2134,6 +2188,37 @@ td small {
 
   .tool-feedback-actions {
     justify-content: flex-start;
+  }
+
+  .app,
+  main,
+  .panel,
+  .ban-panel,
+  .blacklist-section,
+  .stats-title-row,
+  .connection-controls,
+  .connection-sort-row {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .ban-panel > *,
+  .blacklist-actions > *,
+  .topbar-actions > * {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .blacklist-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    justify-content: stretch;
+  }
+
+  .empty-state {
+    align-items: flex-start;
+    padding: 12px;
+    line-height: 1.5;
   }
 
   .page-task-main {

@@ -49,6 +49,8 @@ function usersToEnv(users = []) {
 function nodeEnv({ node, users, action, extra = {} }) {
   return {
     SIMPLEUI_ACTION: action,
+    SIMPLEUI_NODE_ID: node.id,
+    SIMPLEUI_REMOTE_KEY: node.remoteKey,
     SIMPLEUI_PROTOCOL: node.protocol,
     SIMPLEUI_SERVICE: node.service,
     SIMPLEUI_SERVICE_PROTO: node.serviceProtocol,
@@ -505,6 +507,141 @@ export function mergeDiscoveredNodes(state, server, discoveredNodes = [], { time
   return summary;
 }
 
+function blacklistNodeKey(serverId, nodeId, target) {
+  return `${serverId}:${nodeId}:${String(target || "").trim().toLowerCase()}`;
+}
+
+function findNodeForBlacklist(state, serverId, record = {}) {
+  const remoteKey = cleanText(record.remoteKey);
+  if (remoteKey) {
+    const matched = (state.nodes || []).find((node) => node.serverId === serverId && node.remoteKey === remoteKey);
+    if (matched) return matched;
+  }
+
+  const listenPort = optionalNumber(record.listenPort ?? record.port);
+  return (state.nodes || []).find((node) =>
+    node.serverId === serverId &&
+    (!record.protocol || node.protocol === record.protocol) &&
+    (!listenPort || Number(node.listenPort || node.port || 443) === listenPort) &&
+    (!record.configPath || cleanText(node.configPath) === cleanText(record.configPath))
+  );
+}
+
+function isActiveBlacklistEntry(entry = {}) {
+  return entry.status !== "removed" && entry.status !== "inactive";
+}
+
+function upsertBlacklistRecord(state, {
+  server,
+  node,
+  target,
+  ipFamily,
+  remoteKey,
+  source = "remote-sync",
+  createdAt,
+  timestamp = new Date().toISOString()
+}) {
+  if (!server?.id || !node?.id || !target) return null;
+  state.bans = state.bans || [];
+  const existing = state.bans.find((entry) =>
+    entry.serverId === server.id &&
+    entry.nodeId === node.id &&
+    String(entry.target || "").trim().toLowerCase() === String(target).trim().toLowerCase()
+  );
+  const next = {
+    targetKind: "source-ip",
+    target,
+    ipFamily: Number(ipFamily || 0) || undefined,
+    serverId: server.id,
+    nodeId: node.id,
+    remoteKey: cleanText(remoteKey) || node.remoteKey || "",
+    status: "active",
+    source,
+    remoteCreatedAt: createdAt || existing?.remoteCreatedAt || timestamp,
+    lastSeenAt: timestamp,
+    updatedAt: timestamp
+  };
+  if (existing) {
+    Object.assign(existing, next);
+    return existing;
+  }
+  const created = stamp({
+    ...next,
+    createdAt: createdAt || timestamp
+  }, true);
+  created.updatedAt = timestamp;
+  state.bans.push(created);
+  return created;
+}
+
+function markBlacklistRemoved(state, { server, node, target, timestamp = new Date().toISOString() }) {
+  if (!server?.id || !node?.id || !target) return false;
+  state.bans = state.bans || [];
+  let changed = false;
+  for (const entry of state.bans) {
+    if (
+      entry.serverId === server.id &&
+      entry.nodeId === node.id &&
+      String(entry.target || "").trim().toLowerCase() === String(target).trim().toLowerCase() &&
+      isActiveBlacklistEntry(entry)
+    ) {
+      entry.status = "removed";
+      entry.removedAt = timestamp;
+      entry.updatedAt = timestamp;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+export function syncBlacklistRecords(state, server, records = [], { timestamp = new Date().toISOString(), audit = false, jobId } = {}) {
+  if (!Array.isArray(records)) return { active: 0, removed: 0 };
+  const seen = new Set();
+  const serverNodeIds = new Set((state.nodes || []).filter((node) => node.serverId === server.id).map((node) => node.id));
+  let active = 0;
+  let removed = 0;
+
+  for (const record of records) {
+    const target = cleanText(record?.target);
+    if (!target) continue;
+    const node = findNodeForBlacklist(state, server.id, record);
+    if (!node) continue;
+    seen.add(blacklistNodeKey(server.id, node.id, target));
+    upsertBlacklistRecord(state, {
+      server,
+      node,
+      target,
+      ipFamily: record.ipFamily,
+      remoteKey: record.remoteKey,
+      source: cleanText(record.source) || "remote-sync",
+      createdAt: record.createdAt,
+      timestamp
+    });
+    active += 1;
+  }
+
+  for (const entry of state.bans || []) {
+    if (!isActiveBlacklistEntry(entry)) continue;
+    const belongsToServer = entry.serverId === server.id || (entry.nodeId && serverNodeIds.has(entry.nodeId));
+    if (!belongsToServer || !entry.nodeId || !entry.target) continue;
+    if (seen.has(blacklistNodeKey(server.id, entry.nodeId, entry.target))) continue;
+    entry.status = "removed";
+    entry.removedAt = timestamp;
+    entry.updatedAt = timestamp;
+    removed += 1;
+  }
+
+  if (audit && (active || removed)) {
+    appendAudit(
+      state,
+      "blacklist.sync",
+      `${server.name} blacklist synced: ${active} active, ${removed} removed`,
+      { serverId: server.id, jobId }
+    );
+  }
+  return { active, removed };
+}
+
 export async function applyStatusResult({ server, node, status, jobId, audit = true }) {
   if (!status) return;
   const timestamp = new Date().toISOString();
@@ -624,7 +761,11 @@ export async function applyServerStatusResult({ server, status, audit = false })
     };
     savedServer.updatedAt = timestamp;
     if (audit) appendAudit(state, "server.status.refresh", `${server.name} server status refreshed`, { serverId: server.id });
-    return mergeDiscoveredNodes(state, savedServer, status.discoveredNodes || [], { timestamp, audit });
+    const discovery = mergeDiscoveredNodes(state, savedServer, status.discoveredNodes || [], { timestamp, audit });
+    const blacklists = Array.isArray(status.blacklists)
+      ? syncBlacklistRecords(state, savedServer, status.blacklists, { timestamp, audit })
+      : { active: 0, removed: 0 };
+    return { ...discovery, blacklists };
   });
 }
 
@@ -716,6 +857,7 @@ export function removeServerState(state, serverId) {
     }))
     .filter((user) => (user.nodeIds || []).length);
   state.bans = (state.bans || [])
+    .filter((ban) => ban.serverId !== serverId && (!ban.nodeId || !removedNodeIds.has(ban.nodeId)))
     .map((ban) => ({
       ...ban,
       nodeIds: (ban.nodeIds || []).filter((nodeId) => !removedNodeIds.has(nodeId)),
@@ -736,6 +878,7 @@ export function removeNodeState(state, nodeId) {
     }))
     .filter((user) => (user.nodeIds || []).length);
   state.bans = (state.bans || [])
+    .filter((ban) => ban.nodeId !== nodeId)
     .map((ban) => ({
       ...ban,
       nodeIds: (ban.nodeIds || []).filter((id) => id !== nodeId),
@@ -1131,7 +1274,7 @@ export async function runDeleteNodeJob(job, { server, node }) {
   }
 }
 
-export async function runRemoteAction({ type, title, server, node, extra = {} }) {
+export async function runRemoteAction({ type, title, server, node, extra = {}, remoteAction = type }) {
   const job = await createJob({ type, title, payload: { server, node } });
   const secrets = [extra?.target, extra?.SIMPLEUI_BAN_IP, server?.hookToken];
   queueMicrotask(async () => {
@@ -1139,7 +1282,7 @@ export async function runRemoteAction({ type, title, server, node, extra = {} })
     try {
       const result = await callHookAgent({
         server,
-        action: type,
+        action: remoteAction,
         env: nodeEnv({ node, users: [], action: type, extra }),
         timeoutMs: 120_000
       });
@@ -1150,6 +1293,38 @@ export async function runRemoteAction({ type, title, server, node, extra = {} })
         result.output;
       if (type === "status") {
         await applyStatusResult({ server, node, status: parsed, jobId: job.id });
+      } else if (type === "ban" && parsed && typeof parsed === "object") {
+        await mutateDb((state) => {
+          upsertBlacklistRecord(state, {
+            server,
+            node,
+            target: parsed.target || extra.SIMPLEUI_BAN_IP,
+            ipFamily: parsed.ipFamily,
+            remoteKey: parsed.remoteKey || node.remoteKey,
+            source: "remote-job",
+            createdAt: parsed.createdAt,
+            timestamp: new Date().toISOString()
+          });
+          appendAudit(state, "ban.create", `Block source IP ${parsed.target || extra.SIMPLEUI_BAN_IP} on ${node.name}`, {
+            serverId: server.id,
+            nodeId: node.id,
+            jobId: job.id
+          });
+        });
+      } else if (type === "unban" && parsed && typeof parsed === "object") {
+        await mutateDb((state) => {
+          markBlacklistRemoved(state, {
+            server,
+            node,
+            target: parsed.target || extra.SIMPLEUI_BAN_IP,
+            timestamp: new Date().toISOString()
+          });
+          appendAudit(state, "ban.remove", `Unblock source IP ${parsed.target || extra.SIMPLEUI_BAN_IP} on ${node.name}`, {
+            serverId: server.id,
+            nodeId: node.id,
+            jobId: job.id
+          });
+        });
       }
       await patchJob(job.id, { status: "success", result: parsed });
       getStream(job.id).emit("done", { status: "success", result: parsed });
