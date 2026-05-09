@@ -1,6 +1,6 @@
 {
   "name": "simpleui-node-orchestrator",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "packageManager": "pnpm@10.33.2",
   "type": "module",
@@ -26,7 +26,7 @@
     "desktop:dist:mac": "pnpm build && electron-builder --mac dmg zip --publish never",
     "desktop:dist:linux": "pnpm build && electron-builder --linux deb zip --publish never",
     "test": "node --test",
-    "check": "node --check server/index.js && node --check server/lib/auth.js && node --check server/lib/db.js && node --check server/lib/hook-agent.js && node --check server/lib/jobs.js && node --check server/lib/providers.js && node --check server/lib/security.js && node --check server/lib/ssh.js && node --check desktop/main.cjs && pnpm test"
+    "check": "node --check server/index.js && node --check server/lib/auth.js && node --check server/lib/db.js && node --check server/lib/hook-agent.js && node --check server/lib/jobs.js && node --check server/lib/providers.js && node --check server/lib/security.js && node --check server/lib/ssh.js && node --check desktop/main.cjs && node --check scripts/after-pack.cjs && pnpm test"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -57,6 +57,7 @@
     "appId": "dev.simpleui.node-orchestrator",
     "productName": "SimpleUI",
     "npmRebuild": false,
+    "afterPack": "scripts/after-pack.cjs",
     "directories": {
       "buildResources": "build"
     },
