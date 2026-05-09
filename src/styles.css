@@ -727,6 +727,55 @@ textarea:focus {
   box-shadow: 0 0 0 3px rgba(23, 107, 91, 0.12);
 }
 
+input[type="checkbox"] {
+  display: inline-grid;
+  place-content: center;
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  min-height: 18px;
+  margin: 0;
+  padding: 0;
+  appearance: none;
+  color: #ffffff;
+  background-color: #ffffff;
+  border: 1px solid #b8c6c2;
+  border-radius: 5px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 1px 1px rgba(16, 32, 28, 0.04);
+  cursor: pointer;
+  transition: background-color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+  vertical-align: middle;
+}
+
+input[type="checkbox"]:hover:not(:disabled) {
+  border-color: rgba(23, 107, 91, 0.65);
+  box-shadow: 0 0 0 3px rgba(23, 107, 91, 0.08);
+}
+
+input[type="checkbox"]:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(23, 107, 91, 0.14);
+}
+
+input[type="checkbox"]:checked {
+  background-color: var(--accent);
+  background-image: url("data:image/svg+xml,%3Csvg width='14' height='14' viewBox='0 0 14 14' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 7.2L5.6 9.8L11 4.2' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 14px 14px;
+  border-color: var(--accent);
+}
+
+input[type="checkbox"]:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  background-color: #eef2f1;
+  border-color: #d5dedb;
+}
+
 .span-2 {
   grid-column: span 2;
 }
@@ -766,7 +815,7 @@ textarea:focus {
 
 .toggle-row {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-columns: 18px minmax(0, 1fr);
   align-items: center;
   min-height: 38px;
   gap: 9px;
@@ -777,10 +826,9 @@ textarea:focus {
 }
 
 .toggle-row input {
-  width: 16px;
-  min-height: 16px;
+  width: 18px;
+  min-height: 18px;
   padding: 0;
-  accent-color: var(--accent);
 }
 
 .toggle-row span {
@@ -1661,6 +1709,16 @@ td small {
   margin: 14px 0 18px;
 }
 
+.blacklist-section table {
+  min-width: 940px;
+}
+
+.blacklist-section th:first-child,
+.blacklist-section td:first-child {
+  width: 54px;
+  text-align: center;
+}
+
 .blacklist-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1668,36 +1726,135 @@ td small {
   gap: 8px;
 }
 
-.blacklist-node-list {
-  display: block;
-  max-width: 360px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.blacklist-group-row td {
+  border-top: 1px solid #d9e4e0;
+  border-bottom-color: #d9e4e0;
 }
 
-.blacklist-chip-list {
+.blacklist-root-row td {
+  background: linear-gradient(90deg, rgba(23, 107, 91, 0.09), rgba(23, 107, 91, 0.035));
+  box-shadow: inset 4px 0 0 rgba(23, 107, 91, 0.42);
+}
+
+.blacklist-node-row td {
+  background: #f8fbfa;
+}
+
+.blacklist-node-row td:nth-child(2),
+.blacklist-record-row td:nth-child(2) {
+  position: relative;
+}
+
+.blacklist-node-row td:nth-child(2)::before,
+.blacklist-record-row td:nth-child(2)::before {
+  position: absolute;
+  content: "";
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #d7e4df;
+}
+
+.blacklist-node-row td:nth-child(2)::before {
+  left: 22px;
+}
+
+.blacklist-record-row td:nth-child(2)::before {
+  left: 18px;
+}
+
+.blacklist-record-nested-row td:nth-child(2)::before {
+  left: 34px;
+}
+
+.blacklist-record-row td:nth-child(2)::after {
+  position: absolute;
+  content: "";
+  top: 50%;
+  left: 18px;
+  width: 13px;
+  height: 2px;
+  background: #d7e4df;
+}
+
+.blacklist-record-nested-row td:nth-child(2)::after {
+  left: 34px;
+}
+
+.blacklist-collapse-button {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  max-width: 520px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  min-width: 0;
+  padding: 0;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  text-align: left;
 }
 
-.blacklist-chip {
+.compact-table .blacklist-collapse-button {
+  min-height: 32px;
+  padding: 0;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.blacklist-collapse-button:hover {
+  color: var(--accent);
+}
+
+.blacklist-collapse-button svg {
+  flex: 0 0 auto;
+  color: #6f817b;
+}
+
+.blacklist-node-row .blacklist-collapse-button {
+  padding-left: 34px;
+}
+
+.blacklist-record-row td:nth-child(2) {
+  padding-left: 38px;
+}
+
+.blacklist-record-nested-row td:nth-child(2) {
+  padding-left: 54px;
+}
+
+.blacklist-collapse-button span {
   display: inline-flex;
   align-items: center;
-  min-height: 24px;
-  max-width: 220px;
-  padding: 0 9px;
-  overflow: hidden;
-  color: #40504b;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-height: 22px;
+  padding: 0 8px;
+  color: #52615c;
   background: #edf3f1;
-  border: 1px solid #dce7e3;
-  border-radius: 999px;
+  border-radius: 6px;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 850;
+}
+
+.blacklist-collapse-button strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.blacklist-collapse-button small {
+  color: var(--muted);
+}
+
+.blacklist-record-row td {
+  background: #ffffff;
+}
+
+.blacklist-record-row:hover td {
+  background: #fbfdfc;
 }
 
 .segmented-control {
@@ -1928,10 +2085,9 @@ td small {
 }
 
 .node-select-table input[type="checkbox"] {
-  width: 16px;
-  min-height: 16px;
+  width: 18px;
+  min-height: 18px;
   padding: 0;
-  accent-color: var(--accent);
 }
 
 .modal-empty {

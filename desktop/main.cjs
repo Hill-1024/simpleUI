@@ -5,8 +5,14 @@ const { pathToFileURL } = require("node:url");
 
 const root = path.resolve(__dirname, "..");
 const appIcon = path.join(root, "build/icon.png");
+let mainWindow = null;
+let apiBaseUrlPromise = null;
 
 app.setName("SimpleUI");
+
+function exitApplication() {
+  app.exit(0);
+}
 
 const menuLabels = {
   en: {
@@ -184,11 +190,24 @@ async function startApi() {
   return `http://127.0.0.1:${port}`;
 }
 
+function getBaseUrl() {
+  if (process.env.SIMPLEUI_DESKTOP_DEV === "1") return Promise.resolve("http://127.0.0.1:5173");
+  if (!apiBaseUrlPromise) apiBaseUrlPromise = startApi();
+  return apiBaseUrlPromise;
+}
+
 async function createWindow() {
-  const baseUrl = process.env.SIMPLEUI_DESKTOP_DEV === "1" ? "http://127.0.0.1:5173" : await startApi();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+    return mainWindow;
+  }
+
+  const baseUrl = await getBaseUrl();
   const allowedOrigin = new URL(baseUrl).origin;
   if (process.platform === "darwin") app.dock?.setIcon(appIcon);
-  const win = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1360,
     height: 900,
     minWidth: 1120,
@@ -201,11 +220,16 @@ async function createWindow() {
       sandbox: true
     }
   });
-  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  win.webContents.on("will-navigate", (event, url) => {
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  mainWindow.webContents.on("will-navigate", (event, url) => {
     if (new URL(url).origin !== allowedOrigin) event.preventDefault();
   });
-  await win.loadURL(baseUrl);
+  mainWindow.once("close", exitApplication);
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
+  await mainWindow.loadURL(baseUrl);
+  return mainWindow;
 }
 
 app.whenReady().then(async () => {
@@ -214,7 +238,13 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  exitApplication();
+});
+
+app.on("activate", () => {
+  createWindow().catch((error) => {
+    dialog.showErrorBox("SimpleUI failed to reopen", error.message);
+  });
 });
 
 app.on("before-quit", () => {

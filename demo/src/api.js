@@ -1,4 +1,4 @@
-const storageKey = "simpleui.demo.state.v2";
+const storageKey = "simpleui.demo.state.v4";
 const jobsById = new Map();
 
 const gb = (value) => Math.round(value * 1024 * 1024 * 1024);
@@ -169,7 +169,7 @@ function seedState() {
     ],
     nodes: [
       demoNode("node-hy2-tokyo", "srv-tokyo", "hysteria2", "JP HY2 443", "Game", "jp-hy2.demo.simpleui.dev:443", 443, "online", gb(431), gb(88), 42, "hysteria-server.service"),
-      demoNode("node-trojan-tokyo", "srv-tokyo", "trojan", "JP Trojan TLS", "Streaming", "jp-trojan.demo.simpleui.dev:443", 443, "online", gb(284), gb(61), 28, "trojan.service"),
+      demoNode("node-trojan-tokyo", "srv-tokyo", "trojan", "JP Trojan TLS", "Game", "jp-trojan.demo.simpleui.dev:443", 443, "online", gb(284), gb(61), 28, "trojan.service"),
       demoNode("node-ss-sg", "srv-sg", "shadowsocks", "SG sing-box SS", "General", "sg-ss.demo.simpleui.dev:8388", 8388, "active", gb(178), gb(37), 19, "sing-box.service", true),
       demoNode("node-vless-fra", "srv-fra", "vless", "DE VLESS Reality", "Work", "de-vless.demo.simpleui.dev:443", 443, "online", gb(205), gb(42), 16, "sing-box.service", true),
       demoNode("node-hy2-la", "srv-la", "hysteria2", "US HY2 Lab", "Lab", "us-lab.demo.simpleui.dev:8443", 8443, "warning", gb(74), gb(12), 0, "hysteria-server.service")
@@ -194,7 +194,8 @@ function seedState() {
     bans: [
       blacklist("ban-demo-1", "node-hy2-tokyo", "203.0.113.66", 180),
       blacklist("ban-demo-2", "node-trojan-tokyo", "203.0.113.66", 180),
-      blacklist("ban-demo-3", "node-ss-sg", "2001:db8:54::88", 96)
+      blacklist("ban-demo-3", "node-ss-sg", "2001:db8:54::88", 96),
+      blacklist("ban-demo-4", "node-hy2-tokyo", "198.51.100.42", 42)
     ],
     jobs: [
       completedJob("job-seed-status", "status", "Refresh JP HY2 443", "客户端 4，客户端 IP 2", 7),

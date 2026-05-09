@@ -80,8 +80,9 @@ const releaseTargets = [
   { platform: "Linux", arch: "x64", packages: "deb / zip" }
 ];
 const selectedNodes = ref([]);
-const selectedBlacklistGroups = ref([]);
+const selectedBlacklistRecords = ref([]);
 const blacklistGroupMode = ref("target");
+const collapsedBlacklistGroups = ref([]);
 const serversGrouped = ref(false);
 const nodesGrouped = ref(false);
 const banNodeModalOpen = ref(false);
@@ -501,43 +502,52 @@ const activeBlacklistEntries = computed(() =>
     .flatMap(expandBlacklistEntry)
     .filter((entry) => blacklistEntryActive(entry) && entry.target && entry.nodeId)
 );
+const blacklistRecordRows = computed(() =>
+  activeBlacklistEntries.value
+    .map(blacklistRecordRow)
+    .filter((record) => record.key)
+);
 const blacklistTargetRows = computed(() => {
   const buckets = new Map();
-  for (const entry of activeBlacklistEntries.value) {
-    const key = blacklistTargetKey(entry.target);
+  for (const record of blacklistRecordRows.value) {
+    const key = blacklistTargetKey(record.target);
     if (!key) continue;
     const bucket = buckets.get(key) || {
-      key,
-      target: entry.target,
-      ipFamily: entry.ipFamily,
+      key: `target:${key}`,
+      title: record.target,
+      detail: record.ipFamily ? `IPv${record.ipFamily}` : "IP/CIDR",
       nodeIds: new Set(),
       serverIds: new Set(),
       entries: [],
-      updatedAt: entry.lastSeenAt || entry.updatedAt || entry.createdAt
+      updatedAt: record.updatedAt
     };
-    bucket.entries.push(entry);
-    bucket.nodeIds.add(entry.nodeId);
-    if (entry.serverId) bucket.serverIds.add(entry.serverId);
-    if (!bucket.ipFamily && entry.ipFamily) bucket.ipFamily = entry.ipFamily;
-    bucket.updatedAt = latestTime(bucket.updatedAt, entry.lastSeenAt || entry.updatedAt || entry.createdAt);
+    bucket.entries.push(record);
+    bucket.nodeIds.add(record.nodeId);
+    if (record.serverId) bucket.serverIds.add(record.serverId);
+    if (!bucket.detail && record.ipFamily) bucket.detail = `IPv${record.ipFamily}`;
+    bucket.updatedAt = latestTime(bucket.updatedAt, record.updatedAt);
     buckets.set(key, bucket);
   }
   return Array.from(buckets.values())
     .map((row) => ({
       ...row,
       nodeIds: Array.from(row.nodeIds),
-      serverIds: Array.from(row.serverIds)
+      serverIds: Array.from(row.serverIds),
+      count: row.entries.length,
+      countLabel: `${row.entries.length} 条节点记录`
     }))
-    .sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime() || a.target.localeCompare(b.target));
+    .sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime() || a.title.localeCompare(b.title));
 });
 const nodeBlacklistRows = computed(() =>
   state.nodes
     .map((node) => {
-      const entries = activeBlacklistEntries.value
-        .filter((entry) => entry.nodeId === node.id)
+      const entries = blacklistRecordRows.value
+        .filter((record) => record.nodeId === node.id)
         .sort((a, b) => String(a.target).localeCompare(String(b.target)));
       return {
         key: `node:${node.id}`,
+        groupKey: groupKey(node.group),
+        groupLabel: groupLabel(node.group),
         title: node.name,
         detail: `${serverName(node.serverId)} / ${nodeProtocolLabel(node.protocol)}`,
         count: entries.length,
@@ -545,35 +555,43 @@ const nodeBlacklistRows = computed(() =>
         entries,
         nodeIds: [node.id],
         serverIds: node.serverId ? [node.serverId] : [],
-        targets: entries.map((entry) => entry.target),
-        updatedAt: blacklistRowLatest(entries),
-        actionLabel: "解封"
+        updatedAt: blacklistRowLatest(entries)
       };
     })
     .filter((row) => row.entries.length)
     .sort((a, b) => serverName(a.serverIds[0]).localeCompare(serverName(b.serverIds[0]), "zh-Hans-CN") || a.title.localeCompare(b.title, "zh-Hans-CN"))
 );
+const nodeGroupBlacklistRows = computed(() => {
+  const buckets = new Map();
+  for (const row of nodeBlacklistRows.value) {
+    const key = row.groupKey || "__ungrouped__";
+    const bucket = buckets.get(key) || {
+      key: `node-group:${key}`,
+      title: row.groupLabel || "无分组",
+      detail: "节点分组",
+      count: 0,
+      countLabel: "",
+      entries: [],
+      children: []
+    };
+    bucket.children.push(row);
+    bucket.entries.push(...row.entries);
+    bucket.count = bucket.entries.length;
+    bucket.countLabel = `${bucket.children.length} 个节点 / ${bucket.entries.length} 条记录`;
+    buckets.set(key, bucket);
+  }
+  return Array.from(buckets.values()).sort((a, b) =>
+    a.key === "node-group:__ungrouped__" ? 1 : b.key === "node-group:__ungrouped__" ? -1 : a.title.localeCompare(b.title, "zh-Hans-CN")
+  );
+});
 const blacklistRows = computed(() => {
-  if (blacklistGroupMode.value === "node") return nodeBlacklistRows.value;
-  return blacklistTargetRows.value.map((row) => ({
-    key: row.key,
-    title: row.target,
-    detail: row.ipFamily ? `IPv${row.ipFamily}` : "IP/CIDR",
-    count: row.nodeIds.length,
-    countLabel: `${row.nodeIds.length} 个节点`,
-    entries: row.entries,
-    nodeIds: row.nodeIds,
-    serverIds: row.serverIds,
-    targets: [row.target],
-    updatedAt: row.updatedAt,
-    actionLabel: "解封"
-  }));
+  if (blacklistGroupMode.value === "node") return nodeGroupBlacklistRows.value;
+  return blacklistTargetRows.value;
 });
 const selectedBlacklistRows = computed(() => {
-  const selected = new Set(selectedBlacklistGroups.value);
-  return blacklistRows.value.filter((row) => selected.has(row.key));
+  const selected = new Set(selectedBlacklistRecords.value);
+  return blacklistRecordRows.value.filter((record) => selected.has(record.key));
 });
-const blacklistSelectionLabel = computed(() => (blacklistGroupMode.value === "node" ? "节点" : "IP"));
 const blacklistActiveModeLabel = computed(() => blacklistGroupModes.find((mode) => mode.value === blacklistGroupMode.value)?.label || "按 IP 分组");
 
 function fmtBytes(value = 0) {
@@ -614,6 +632,11 @@ function blacklistTargetKey(target) {
   return String(target || "").trim().toLowerCase();
 }
 
+function blacklistRecordKey(entry = {}) {
+  const targetKey = blacklistTargetKey(entry.target);
+  return entry.nodeId && targetKey ? `${entry.nodeId}::${targetKey}` : "";
+}
+
 function blacklistEntryActive(entry = {}) {
   return !["removed", "inactive"].includes(entry.status);
 }
@@ -632,12 +655,20 @@ function expandBlacklistEntry(entry = {}) {
     .filter((item) => item.nodeId);
 }
 
-function blacklistNodeLabel(row = {}) {
-  return row.nodeIds?.map((id) => nodeName(id)).filter(Boolean).join("、") || "-";
-}
-
-function blacklistServerLabel(row = {}) {
-  return row.serverIds?.map((id) => serverName(id)).filter(Boolean).join("、") || "-";
+function blacklistRecordRow(entry = {}) {
+  const node = state.nodes.find((item) => item.id === entry.nodeId);
+  const serverId = entry.serverId || node?.serverId || "";
+  const updatedAt = entry.lastSeenAt || entry.updatedAt || entry.createdAt;
+  return {
+    ...entry,
+    key: blacklistRecordKey(entry),
+    serverId,
+    nodeLabel: node?.name || nodeName(entry.nodeId),
+    nodeDetail: node ? nodeProtocolLabel(node.protocol) : "",
+    serverLabel: serverName(serverId),
+    targetDetail: entry.ipFamily ? `IPv${entry.ipFamily}` : "IP/CIDR",
+    updatedAt
+  };
 }
 
 function blacklistRowLatest(entries = []) {
@@ -1028,7 +1059,7 @@ function clearRuntimeState() {
     monitorProtocols: []
   });
   selectedNodes.value = [];
-  selectedBlacklistGroups.value = [];
+  selectedBlacklistRecords.value = [];
   activeJob.value = null;
   jobLogs.value = [];
   toolFeedback.value = null;
@@ -1130,8 +1161,8 @@ async function load() {
   Object.assign(state, data);
   const currentNodeIds = new Set((data.nodes || []).map((node) => node.id));
   selectedNodes.value = selectedNodes.value.filter((id) => currentNodeIds.has(id));
-  const currentBlacklistGroups = new Set(blacklistRows.value.map((row) => row.key));
-  selectedBlacklistGroups.value = selectedBlacklistGroups.value.filter((key) => currentBlacklistGroups.has(key));
+  const currentBlacklistRecords = new Set(blacklistRecordRows.value.map((record) => record.key));
+  selectedBlacklistRecords.value = selectedBlacklistRecords.value.filter((key) => currentBlacklistRecords.has(key));
   if (!deployServerId.value && readyServers.value.length) {
     deployServerId.value = readyServers.value[0].id;
   }
@@ -1417,24 +1448,58 @@ function clearSelectedNodes() {
   selectedNodes.value = [];
 }
 
-function toggleBlacklistGroup(key, checked) {
+function toggleBlacklistRecord(key, checked) {
   if (!key) return;
   if (checked) {
-    if (!selectedBlacklistGroups.value.includes(key)) selectedBlacklistGroups.value = [...selectedBlacklistGroups.value, key];
+    if (!selectedBlacklistRecords.value.includes(key)) selectedBlacklistRecords.value = [...selectedBlacklistRecords.value, key];
     return;
   }
-  selectedBlacklistGroups.value = selectedBlacklistGroups.value.filter((item) => item !== key);
+  selectedBlacklistRecords.value = selectedBlacklistRecords.value.filter((item) => item !== key);
 }
 
-function selectAllBlacklistGroups() {
-  selectedBlacklistGroups.value = blacklistRows.value.map((row) => row.key);
+function toggleBlacklistGroup(row, checked) {
+  const keys = new Set((row?.entries || []).map((record) => record.key).filter(Boolean));
+  if (!keys.size) return;
+  if (checked) {
+    const selected = new Set(selectedBlacklistRecords.value);
+    for (const key of keys) selected.add(key);
+    selectedBlacklistRecords.value = Array.from(selected);
+    return;
+  }
+  selectedBlacklistRecords.value = selectedBlacklistRecords.value.filter((key) => !keys.has(key));
 }
 
-function clearSelectedBlacklistGroups() {
-  selectedBlacklistGroups.value = [];
+function blacklistGroupSelectedCount(row = {}) {
+  const selected = new Set(selectedBlacklistRecords.value);
+  return (row.entries || []).filter((record) => selected.has(record.key)).length;
 }
 
-watch(blacklistGroupMode, () => clearSelectedBlacklistGroups());
+function blacklistGroupAllSelected(row = {}) {
+  return !!row.entries?.length && blacklistGroupSelectedCount(row) === row.entries.length;
+}
+
+function blacklistGroupCollapsed(key) {
+  return collapsedBlacklistGroups.value.includes(key);
+}
+
+function toggleBlacklistCollapse(key) {
+  if (!key) return;
+  if (blacklistGroupCollapsed(key)) {
+    collapsedBlacklistGroups.value = collapsedBlacklistGroups.value.filter((item) => item !== key);
+    return;
+  }
+  collapsedBlacklistGroups.value = [...collapsedBlacklistGroups.value, key];
+}
+
+function selectAllBlacklistRecords() {
+  selectedBlacklistRecords.value = blacklistRows.value.flatMap((row) => row.entries.map((record) => record.key)).filter(Boolean);
+}
+
+function clearSelectedBlacklistRecords() {
+  selectedBlacklistRecords.value = [];
+}
+
+watch(blacklistGroupMode, () => clearSelectedBlacklistRecords());
 
 function prepareHookUpgrade(server) {
   Object.assign(serverForm, {
@@ -1792,16 +1857,14 @@ async function runBan() {
   }
 }
 
-function blacklistUnbanRequests(rows = []) {
+function blacklistUnbanRequests(records = []) {
   const buckets = new Map();
-  for (const row of rows) {
-    for (const entry of row.entries || []) {
-      const key = blacklistTargetKey(entry.target);
-      if (!key || !entry.nodeId) continue;
-      const bucket = buckets.get(key) || { target: entry.target, nodeIds: new Set() };
-      bucket.nodeIds.add(entry.nodeId);
-      buckets.set(key, bucket);
-    }
+  for (const record of records) {
+    const key = blacklistTargetKey(record.target);
+    if (!key || !record.nodeId) continue;
+    const bucket = buckets.get(key) || { target: record.target, nodeIds: new Set() };
+    bucket.nodeIds.add(record.nodeId);
+    buckets.set(key, bucket);
   }
   return Array.from(buckets.values()).map((bucket) => ({
     target: bucket.target,
@@ -1809,25 +1872,16 @@ function blacklistUnbanRequests(rows = []) {
   }));
 }
 
-function blacklistRecordCount(rows = []) {
-  return blacklistUnbanRequests(rows).reduce((total, request) => total + request.nodeIds.length, 0);
+function blacklistRecordConfirmText(record) {
+  return `解封 ${record.target} 在节点 ${record.nodeLabel} 上的黑名单记录？`;
 }
 
-function blacklistRowConfirmText(row) {
-  if (blacklistGroupMode.value === "node") {
-    return `解封节点 ${row.title} 上的 ${row.count} 个封禁 IP？`;
-  }
-  return `解封 IP ${row.title} 的 ${row.count} 条节点黑名单记录？`;
+function blacklistRecordJobTitle(record) {
+  return `解封 ${record.target} / ${record.nodeLabel}`;
 }
 
-function blacklistRowJobTitle(row) {
-  return blacklistGroupMode.value === "node"
-    ? `解封节点 ${row.title} 的黑名单`
-    : `解封客户端 IP ${row.title}`;
-}
-
-async function runBlacklistUnbanRows(rows, title) {
-  const requests = blacklistUnbanRequests(rows);
+async function runBlacklistUnbanRecords(records, title) {
+  const requests = blacklistUnbanRequests(records);
   if (!requests.length) return;
   busy.value = true;
   const jobs = [];
@@ -1839,7 +1893,7 @@ async function runBlacklistUnbanRows(rows, title) {
       });
       jobs.push(...(result.jobs || []));
     }
-    selectedBlacklistGroups.value = [];
+    selectedBlacklistRecords.value = [];
     if (jobs.length) {
       watchJobs(jobs, title, { feedbackPage: "connections" });
     } else {
@@ -1852,18 +1906,17 @@ async function runBlacklistUnbanRows(rows, title) {
   }
 }
 
-async function runBlacklistRowUnban(row) {
-  if (!row) return;
-  if (!window.confirm(blacklistRowConfirmText(row))) return;
-  await runBlacklistUnbanRows([row], blacklistRowJobTitle(row));
+async function runBlacklistRecordUnban(record) {
+  if (!record) return;
+  if (!window.confirm(blacklistRecordConfirmText(record))) return;
+  await runBlacklistUnbanRecords([record], blacklistRecordJobTitle(record));
 }
 
 async function runSelectedUnban() {
-  const rows = selectedBlacklistRows.value;
-  if (!rows.length) return;
-  const recordCount = blacklistRecordCount(rows);
-  if (!window.confirm(`解封选中的 ${rows.length} 个${blacklistSelectionLabel.value}分组，共 ${recordCount} 条节点黑名单记录？`)) return;
-  await runBlacklistUnbanRows(rows, `解封选中的 ${rows.length} 个${blacklistSelectionLabel.value}分组`);
+  const records = selectedBlacklistRows.value;
+  if (!records.length) return;
+  if (!window.confirm(`解封选中的 ${records.length} 条节点黑名单记录？`)) return;
+  await runBlacklistUnbanRecords(records, `解封选中的 ${records.length} 条黑名单记录`);
 }
 
 async function runOptimize() {
@@ -2958,10 +3011,10 @@ onUnmounted(() => {
                   {{ mode.label }}
                 </button>
               </div>
-              <button type="button" class="secondary-button" :disabled="!blacklistRows.length" @click="selectAllBlacklistGroups">全选当前分组</button>
-              <button type="button" class="secondary-button" :disabled="!selectedBlacklistGroups.length" @click="clearSelectedBlacklistGroups">清空</button>
-              <button type="button" class="danger-button" :disabled="!selectedBlacklistGroups.length" @click="runSelectedUnban">
-                <Eraser :size="16" />解封选中（{{ selectedBlacklistGroups.length }}）
+              <button type="button" class="secondary-button" :disabled="!blacklistRecordRows.length" @click="selectAllBlacklistRecords">全选当前记录</button>
+              <button type="button" class="secondary-button" :disabled="!selectedBlacklistRecords.length" @click="clearSelectedBlacklistRecords">清空</button>
+              <button type="button" class="danger-button" :disabled="!selectedBlacklistRecords.length" @click="runSelectedUnban">
+                <Eraser :size="16" />解封选中（{{ selectedBlacklistRecords.length }}）
               </button>
             </div>
           </div>
@@ -2972,29 +3025,82 @@ onUnmounted(() => {
                 <thead>
                   <tr>
                     <th>选择</th>
-                    <th>{{ blacklistGroupMode === "node" ? "节点" : "封禁 IP/CIDR" }}</th>
-                    <th>{{ blacklistGroupMode === "node" ? "封禁数" : "节点数" }}</th>
+                    <th>封禁 IP/CIDR</th>
+                    <th>节点</th>
                     <th>服务器</th>
-                    <th>{{ blacklistGroupMode === "node" ? "封禁 IP" : "节点" }}</th>
                     <th>最近同步</th>
                     <th>操作</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="row in blacklistRows" :key="row.key">
-                    <td><input type="checkbox" :checked="selectedBlacklistGroups.includes(row.key)" @change="toggleBlacklistGroup(row.key, $event.target.checked)" /></td>
-                    <td><strong>{{ row.title }}</strong><small>{{ row.detail }}</small></td>
-                    <td>{{ row.countLabel }}</td>
-                    <td>{{ blacklistServerLabel(row) }}</td>
-                    <td>
-                      <div v-if="blacklistGroupMode === 'node'" class="blacklist-chip-list">
-                        <span v-for="target in row.targets" :key="`${row.key}-${target}`" class="blacklist-chip">{{ target }}</span>
-                      </div>
-                      <span v-else class="blacklist-node-list">{{ blacklistNodeLabel(row) }}</span>
-                    </td>
-                    <td>{{ fmtTime(row.updatedAt) }}</td>
-                    <td><button type="button" class="danger-text" @click="runBlacklistRowUnban(row)">{{ row.actionLabel }}</button></td>
-                  </tr>
+                  <template v-if="blacklistGroupMode === 'node'">
+                    <template v-for="group in blacklistRows" :key="group.key">
+                      <tr class="blacklist-group-row blacklist-root-row">
+                        <td><input type="checkbox" :checked="blacklistGroupAllSelected(group)" @change="toggleBlacklistGroup(group, $event.target.checked)" /></td>
+                        <td colspan="5">
+                          <button type="button" class="blacklist-collapse-button" :aria-expanded="!blacklistGroupCollapsed(group.key)" @click="toggleBlacklistCollapse(group.key)">
+                            <ChevronRight v-if="blacklistGroupCollapsed(group.key)" :size="16" />
+                            <ChevronDown v-else :size="16" />
+                            <span>节点分组</span>
+                            <strong>{{ group.title }}</strong>
+                            <small>{{ group.countLabel }} · 已选 {{ blacklistGroupSelectedCount(group) }} 条</small>
+                          </button>
+                        </td>
+                      </tr>
+                      <template v-if="!blacklistGroupCollapsed(group.key)">
+                        <template v-for="nodeRow in group.children" :key="nodeRow.key">
+                          <tr class="blacklist-group-row blacklist-node-row">
+                            <td><input type="checkbox" :checked="blacklistGroupAllSelected(nodeRow)" @change="toggleBlacklistGroup(nodeRow, $event.target.checked)" /></td>
+                            <td colspan="5">
+                              <button type="button" class="blacklist-collapse-button" :aria-expanded="!blacklistGroupCollapsed(nodeRow.key)" @click="toggleBlacklistCollapse(nodeRow.key)">
+                                <ChevronRight v-if="blacklistGroupCollapsed(nodeRow.key)" :size="16" />
+                                <ChevronDown v-else :size="16" />
+                                <span>节点</span>
+                                <strong>{{ nodeRow.title }}</strong>
+                                <small>{{ nodeRow.detail }} · {{ nodeRow.countLabel }} · 已选 {{ blacklistGroupSelectedCount(nodeRow) }} 条</small>
+                              </button>
+                            </td>
+                          </tr>
+                          <template v-if="!blacklistGroupCollapsed(nodeRow.key)">
+                            <tr v-for="record in nodeRow.entries" :key="record.key" class="blacklist-record-row blacklist-record-nested-row">
+                              <td><input type="checkbox" :checked="selectedBlacklistRecords.includes(record.key)" @change="toggleBlacklistRecord(record.key, $event.target.checked)" /></td>
+                              <td><strong>{{ record.target }}</strong><small>{{ record.targetDetail }}</small></td>
+                              <td><strong>{{ record.nodeLabel }}</strong><small>{{ record.nodeDetail }}</small></td>
+                              <td>{{ record.serverLabel }}</td>
+                              <td>{{ fmtTime(record.updatedAt) }}</td>
+                              <td><button type="button" class="danger-text" @click="runBlacklistRecordUnban(record)">解封此记录</button></td>
+                            </tr>
+                          </template>
+                        </template>
+                      </template>
+                    </template>
+                  </template>
+                  <template v-else>
+                    <template v-for="row in blacklistRows" :key="row.key">
+                      <tr class="blacklist-group-row blacklist-root-row">
+                        <td><input type="checkbox" :checked="blacklistGroupAllSelected(row)" @change="toggleBlacklistGroup(row, $event.target.checked)" /></td>
+                        <td colspan="5">
+                          <button type="button" class="blacklist-collapse-button" :aria-expanded="!blacklistGroupCollapsed(row.key)" @click="toggleBlacklistCollapse(row.key)">
+                            <ChevronRight v-if="blacklistGroupCollapsed(row.key)" :size="16" />
+                            <ChevronDown v-else :size="16" />
+                            <span>IP</span>
+                            <strong>{{ row.title }}</strong>
+                            <small>{{ row.detail }} · {{ row.countLabel }} · 已选 {{ blacklistGroupSelectedCount(row) }} 条</small>
+                          </button>
+                        </td>
+                      </tr>
+                      <template v-if="!blacklistGroupCollapsed(row.key)">
+                        <tr v-for="record in row.entries" :key="record.key" class="blacklist-record-row">
+                          <td><input type="checkbox" :checked="selectedBlacklistRecords.includes(record.key)" @change="toggleBlacklistRecord(record.key, $event.target.checked)" /></td>
+                          <td><strong>{{ record.target }}</strong><small>{{ record.targetDetail }}</small></td>
+                          <td><strong>{{ record.nodeLabel }}</strong><small>{{ record.nodeDetail }}</small></td>
+                          <td>{{ record.serverLabel }}</td>
+                          <td>{{ fmtTime(record.updatedAt) }}</td>
+                          <td><button type="button" class="danger-text" @click="runBlacklistRecordUnban(record)">解封此记录</button></td>
+                        </tr>
+                      </template>
+                    </template>
+                  </template>
                 </tbody>
               </table>
             </div>
