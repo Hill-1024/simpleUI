@@ -172,6 +172,8 @@ async function startApi() {
   process.env.NODE_ENV = "production";
   process.env.SIMPLEUI_DESKTOP = "1";
   process.env.SIMPLEUI_PORT = String(port);
+  process.env.SIMPLEUI_DATA_DIR = process.env.SIMPLEUI_DATA_DIR || path.join(app.getPath("userData"), "data");
+  console.log(`SimpleUI desktop data directory: ${process.env.SIMPLEUI_DATA_DIR}`);
   try {
     await import(pathToFileURL(serverEntry).href);
   } catch (error) {
