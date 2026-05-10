@@ -175,6 +175,7 @@ GitHub Releases build and upload:
 
 - Production installs listen on `127.0.0.1` by default. Use a reverse proxy, TLS, access control, or VPN before exposing the panel.
 - The initial password is only for bootstrap. Change it after deployment.
+- Persistent hooks use self-signed HTTPS with certificate fingerprint pinning; still expose hook ports only through a firewall, VPN, or SSH tunnel.
 - Remote server credentials should only be used in trusted environments. Once hooks are online, routine maintenance should avoid repeated SSH credential entry.
 - The panel includes remote command and terminal capabilities; do not expose a production instance to an untrusted network.
 

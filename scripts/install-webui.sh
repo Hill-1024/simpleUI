@@ -7,6 +7,8 @@ REPO_URL="${SIMPLEUI_REPO_URL:-https://github.com/Hill-1024/simpleUI.git}"
 BRANCH="${SIMPLEUI_BRANCH:-main}"
 HOST="${SIMPLEUI_HOST:-127.0.0.1}"
 PORT="${SIMPLEUI_PORT:-8787}"
+TRUST_PROXY="${SIMPLEUI_TRUST_PROXY:-}"
+ALLOWED_ORIGINS="${SIMPLEUI_ALLOWED_ORIGINS:-}"
 PNPM_VERSION="${SIMPLEUI_PNPM_VERSION:-10.33.2}"
 NODE_MAJOR="${SIMPLEUI_NODE_MAJOR:-22}"
 ACTION="${1:-${SIMPLEUI_ACTION:-install}}"
@@ -53,18 +55,18 @@ esac
 install_base_packages() {
   if command -v apt-get >/dev/null 2>&1; then
     apt-get update
-    apt-get install -y ca-certificates curl git
+    apt-get install -y ca-certificates curl git build-essential python3
     return
   fi
   if command -v dnf >/dev/null 2>&1; then
-    dnf install -y ca-certificates curl git
+    dnf install -y ca-certificates curl git gcc-c++ make python3
     return
   fi
   if command -v yum >/dev/null 2>&1; then
-    yum install -y ca-certificates curl git
+    yum install -y ca-certificates curl git gcc-c++ make python3
     return
   fi
-  echo "Unsupported package manager. Install ca-certificates, curl, git, Node.js ${NODE_MAJOR}+ and pnpm first." >&2
+  echo "Unsupported package manager. Install ca-certificates, curl, git, Node.js ${NODE_MAJOR}+, pnpm, python3, make and a C++ compiler first." >&2
   exit 1
 }
 
@@ -115,6 +117,17 @@ run_as_app_user pnpm -C "${APP_DIR}" install --frozen-lockfile
 run_as_app_user pnpm -C "${APP_DIR}" build
 run_as_app_user pnpm -C "${APP_DIR}" prune --prod
 
+if [[ -z "${TRUST_PROXY}" ]]; then
+  case "${HOST}" in
+    127.*|localhost|::1|\[::1\])
+      TRUST_PROXY=1
+      ;;
+    *)
+      TRUST_PROXY=0
+      ;;
+  esac
+fi
+
 PNPM_BIN="$(command -v pnpm)"
 cat >/etc/systemd/system/simpleui-web.service <<SERVICE
 [Unit]
@@ -129,6 +142,8 @@ WorkingDirectory=${APP_DIR}
 Environment=NODE_ENV=production
 Environment=SIMPLEUI_HOST=${HOST}
 Environment=SIMPLEUI_PORT=${PORT}
+Environment=SIMPLEUI_TRUST_PROXY=${TRUST_PROXY}
+Environment=SIMPLEUI_ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
 ExecStart=${PNPM_BIN} start
 Restart=always
 RestartSec=3

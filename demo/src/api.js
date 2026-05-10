@@ -732,6 +732,20 @@ export const api = {
     });
     return respond({ job });
   },
+  trustHookCertificate: async (serverId) => {
+    const server = findServer(serverId);
+    if (server) {
+      Object.assign(server, stamp({
+        ...server,
+        hookStatus: "online",
+        status: "online",
+        hookSecurity: { transport: "https", pinned: true, legacy: false, mismatch: false, upgradeRequired: false },
+        metrics: { ...(server.metrics || {}), lastSyncError: "" }
+      }));
+      saveState();
+    }
+    return respond({ server });
+  },
   deleteServer: async (serverId) => {
     const server = findServer(serverId);
     const job = createJob({

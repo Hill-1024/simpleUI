@@ -18,8 +18,8 @@ import {
   parseCookies,
   setSessionCookie
 } from "./lib/auth.js";
-import { appendAudit, loadDb, mutateDb, publicServer, publicState, stamp } from "./lib/db.js";
-import { DEFAULT_HOOK_PORT, createHookToken } from "./lib/hook-agent.js";
+import { appendAudit, closeDb, loadDb, mutateDb, publicServer, publicState, stamp } from "./lib/db.js";
+import { DEFAULT_HOOK_PORT, abortHookRequests, checkHookHealth, createHookToken, probeHookCertificate } from "./lib/hook-agent.js";
 import {
   createJob,
   removeNodeState,
@@ -32,22 +32,25 @@ import {
   runRemoteAction,
   runServerAction,
   syncServerAndNodes,
+  closeJobStreams,
   subscribeJob
 } from "./lib/jobs.js";
 import { isDeployableProtocol, monitorProtocolIds, monitorProtocolList, monitorProtocols, providerList } from "./lib/providers.js";
 import {
   buildAllowedOrigins,
+  buildContentSecurityPolicy,
   hasNoControlChars,
   hasNoShellControlChars,
   isAllowedOrigin,
   isLoopbackBindHost,
-  isSameHostOrigin,
   isTrustedBrowserRequest,
   isUnsafeMethod,
   isValidServerHost,
   isValidUsername,
-  isValidUserPassword
+  isValidUserPassword,
+  normalizeIpTarget
 } from "./lib/security.js";
+import { closeSshConnections } from "./lib/ssh.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -61,7 +64,11 @@ const isProduction = process.env.NODE_ENV === "production" || isDesktop;
 const explicitAuthDisabled = process.env.SIMPLEUI_AUTH_DISABLED === "1";
 const authRequired = !explicitAuthDisabled && !isDesktop && (process.env.NODE_ENV === "production" || !isLoopbackBindHost(host));
 const trustProxy = process.env.SIMPLEUI_TRUST_PROXY === "1" || process.env.SIMPLEUI_TRUST_PROXY === "true";
-const syncIntervalMs = Number(process.env.SIMPLEUI_SYNC_INTERVAL_MS || 15_000);
+const trustOriginProxyHeaders = trustProxy || isLoopbackBindHost(host);
+const syncIntervalMs = Number(process.env.SIMPLEUI_SYNC_INTERVAL_MS || 30_000);
+const devOriginPorts = (!isProduction || process.env.SIMPLEUI_DESKTOP_DEV === "1")
+  ? Array.from({ length: 8 }, (_, index) => 5173 + index)
+  : [];
 const allowedOrigins = buildAllowedOrigins({
   host,
   port,
@@ -87,7 +94,10 @@ app.set("trust proxy", trustProxy ? 1 : false);
 app.use(express.json({ limit: "1mb" }));
 app.use(cors((req, callback) => {
   const origin = req.headers.origin;
-  const allowed = origin && (isAllowedOrigin(origin, allowedOrigins) || isSameHostOrigin(origin, req.headers.host));
+  const allowed = origin && (
+    isAllowedOrigin(origin, allowedOrigins) ||
+    isTrustedBrowserRequest(req, allowedOrigins, { trustProxy: trustOriginProxyHeaders, devOriginPorts })
+  );
   callback(null, {
     origin: allowed ? origin : false,
     credentials: true
@@ -95,11 +105,11 @@ app.use(cors((req, callback) => {
 }));
 app.use(
   helmet({
-    contentSecurityPolicy: false
+    contentSecurityPolicy: buildContentSecurityPolicy()
   })
 );
 app.use((req, res, next) => {
-  if (!isUnsafeMethod(req.method) || isTrustedBrowserRequest(req, allowedOrigins)) {
+  if (!isUnsafeMethod(req.method) || isTrustedBrowserRequest(req, allowedOrigins, { trustProxy: trustOriginProxyHeaders, devOriginPorts })) {
     next();
     return;
   }
@@ -204,39 +214,13 @@ function hostForUrl(host) {
   return isIP(clean) === 6 ? `[${clean}]` : clean;
 }
 
-function normalizeIpTarget(value) {
-  let raw = String(value || "").trim();
-  if (raw.startsWith("[") && raw.includes("]")) {
-    const host = raw.slice(1, raw.indexOf("]"));
-    const suffix = raw.slice(raw.indexOf("]") + 1);
-    raw = suffix.startsWith("/") ? `${host}${suffix}` : host;
-  } else if (raw.includes(".") && raw.split(":").length === 2) {
-    raw = raw.split(":")[0];
-  }
-  let [address, prefix] = raw.split("/");
-  let family = isIP(address);
-  if (!family) return null;
-  if (family === 6 && address.toLowerCase().startsWith("::ffff:")) {
-    const mapped = address.slice(7);
-    if (isIP(mapped) === 4) {
-      address = mapped;
-      family = 4;
-      if (prefix !== undefined) {
-        const mappedPrefix = Number(prefix);
-        if (!Number.isInteger(mappedPrefix) || mappedPrefix < 96 || mappedPrefix > 128) return null;
-        prefix = String(mappedPrefix - 96);
-      }
-    }
-  }
-  if (prefix !== undefined) {
-    if (!/^\d+$/.test(prefix)) return null;
-    const length = Number(prefix);
-    if ((family === 4 && length > 32) || (family === 6 && length > 128)) return null;
-    raw = `${address}/${length}`;
-  } else {
-    raw = address;
-  }
-  return { value: raw, family };
+function hookUrlFor(host, hookPort, protocol = "https") {
+  return `${protocol}://${hostForUrl(host)}:${hookPort || DEFAULT_HOOK_PORT}`;
+}
+
+function hookProtocolFor(server = {}) {
+  if (server.hookCertFingerprint || String(server.hookUrl || "").startsWith("https://")) return "https";
+  return "http";
 }
 
 const nodeSchema = z.object({
@@ -347,6 +331,14 @@ function clearLoginFailures(req) {
   loginFailures.delete(loginAttemptKey(req));
 }
 
+function deferJob(runner) {
+  queueMicrotask(() => {
+    Promise.resolve()
+      .then(runner)
+      .catch((error) => console.warn(`Deferred job failed before its own handler: ${error.message}`));
+  });
+}
+
 function normalizeUsers(users) {
   return users.map((user) => ({
     username: user.username.trim(),
@@ -363,6 +355,24 @@ function manualMonitorEndpoint(server, node) {
   if (explicit) return explicit;
   const host = String(node.domain || "").trim() || server.host;
   return `${hostForUrl(host)}:${node.listenPort}`;
+}
+
+function ipQualityJobOptions(server, data, mode) {
+  return {
+    type: "ipquality",
+    title: `IPQuality ${server.name} ${mode === "ipv6" ? "IPv6" : "IPv4"}`,
+    server,
+    extra: {
+      SIMPLEUI_IPQUALITY_MODE: mode,
+      SIMPLEUI_IPQUALITY_LANGUAGE: data.language,
+      SIMPLEUI_IPQUALITY_INTERFACE: data.interface?.trim(),
+      SIMPLEUI_IPQUALITY_PROXY: data.proxy?.trim(),
+      SIMPLEUI_IPQUALITY_FULL_IP: data.fullIp ? "1" : "0",
+      SIMPLEUI_IPQUALITY_PRIVACY: data.privacy ? "1" : "0"
+    },
+    secrets: [data.proxy],
+    timeoutMs: 30 * 60_000
+  };
 }
 
 async function requireReadyServer(serverId, res) {
@@ -518,7 +528,7 @@ app.post("/api/servers", async (req, res) => {
     id: existingServer?.id || uuid(),
     sshUserHint: data.credential.username,
     hookPort,
-    hookUrl: `http://${hostForUrl(host)}:${hookPort}`,
+    hookUrl: hookUrlFor(host, hookPort, "https"),
     hookToken: token,
     hookStatus: "installing",
     status: "installing"
@@ -536,7 +546,7 @@ app.post("/api/servers", async (req, res) => {
     title: `Install hook on ${saved.name}`,
     payload: { server: saved }
   });
-  queueMicrotask(() => runInstallHookJob(job, { server: saved, credential: data.credential, hookPort, token }));
+  deferJob(() => runInstallHookJob(job, { server: saved, credential: data.credential, hookPort, token }));
   res.status(202).json({ server: publicServer(saved), job });
 });
 
@@ -549,12 +559,15 @@ app.patch("/api/servers/:id", async (req, res) => {
     const host = data.host !== undefined ? normalizeHost(data.host) : server.host;
     const hookPort = data.hookPort !== undefined ? data.hookPort : server.hookPort;
     const shouldRefreshHookUrl = Boolean(server.hookUrl || data.host !== undefined || data.hookPort !== undefined);
+    const endpointChanged = data.host !== undefined || data.hookPort !== undefined;
     Object.assign(server, stamp({
       ...server,
       ...data,
       host,
       hookPort,
-      hookUrl: shouldRefreshHookUrl ? `http://${hostForUrl(host)}:${hookPort || DEFAULT_HOOK_PORT}` : server.hookUrl
+      hookUrl: shouldRefreshHookUrl ? hookUrlFor(host, hookPort || DEFAULT_HOOK_PORT, hookProtocolFor(server)) : server.hookUrl,
+      hookCertFingerprint: endpointChanged ? "" : server.hookCertFingerprint,
+      hookTlsError: endpointChanged ? "" : server.hookTlsError
     }));
     appendAudit(state, "server.update", `${server.name} metadata updated`, { serverId: server.id });
     return server;
@@ -600,7 +613,7 @@ app.delete("/api/servers/:id", async (req, res) => {
       jobId: job.id
     });
   });
-  queueMicrotask(() => runDeleteServerJob(job, { server }));
+  deferJob(() => runDeleteServerJob(job, { server }));
   res.status(202).json({ job, server: publicServer({ ...server, status: "deleting", hookStatus: "deleting" }) });
 });
 
@@ -626,8 +639,56 @@ app.post("/api/servers/:id/hook/upgrade", async (req, res) => {
     title: `Upgrade hook on ${server.name}`,
     payload: { server }
   });
-  queueMicrotask(() => runHookUpgradeJob(job, { server }));
+  deferJob(() => runHookUpgradeJob(job, { server }));
   res.status(202).json({ job });
+});
+
+app.post("/api/servers/:id/hook/trust", async (req, res) => {
+  const state = await loadDb();
+  const server = state.servers.find((item) => item.id === req.params.id);
+  if (!server) {
+    res.status(404).json({ error: "Server not found" });
+    return;
+  }
+  if (!server.hookUrl || !server.hookToken) {
+    res.status(409).json({ error: "Server hook is not installed" });
+    return;
+  }
+  if (!String(server.hookUrl).startsWith("https://")) {
+    res.status(409).json({ error: "Legacy HTTP hooks must be upgraded or reinstalled before certificate trust can be pinned" });
+    return;
+  }
+  let fingerprint = "";
+  try {
+    fingerprint = await probeHookCertificate(server.hookUrl, 10_000);
+    const candidate = { ...server, hookCertFingerprint: fingerprint, hookTlsError: "" };
+    const reachable = await checkHookHealth(candidate, 10_000);
+    if (!reachable) {
+      res.status(409).json({ error: "Current Hook certificate was found, but token-authenticated health check failed" });
+      return;
+    }
+    const updated = await mutateDb((db) => {
+      const savedServer = db.servers.find((item) => item.id === server.id);
+      if (!savedServer) return null;
+      Object.assign(savedServer, stamp({
+        ...savedServer,
+        hookCertFingerprint: fingerprint,
+        hookTlsError: "",
+        hookStatus: "online",
+        status: "online",
+        metrics: {
+          ...(savedServer.metrics || {}),
+          lastSyncError: "",
+          updatedAt: new Date().toISOString()
+        }
+      }));
+      appendAudit(db, "hook.tls.trust", `${savedServer.name} Hook TLS certificate trusted`, { serverId: savedServer.id });
+      return savedServer;
+    });
+    res.json({ server: publicServer(updated) });
+  } catch (error) {
+    res.status(502).json({ error: error.message || "Unable to probe Hook certificate" });
+  }
 });
 
 app.post("/api/deployments", async (req, res) => {
@@ -670,7 +731,7 @@ app.post("/api/deployments", async (req, res) => {
     payload: { server, node }
   });
 
-  queueMicrotask(() => runDeployJob(job, { server, node, users: effectiveUsers }));
+  deferJob(() => runDeployJob(job, { server, node, users: effectiveUsers }));
   res.status(202).json({ job, server: publicServer(server), node });
 });
 
@@ -784,7 +845,7 @@ app.patch("/api/nodes/:id", async (req, res) => {
       jobId: job.id
     });
   });
-  queueMicrotask(() => runDeployJob(job, { server, node, users: effectiveUsers }));
+  deferJob(() => runDeployJob(job, { server, node, users: effectiveUsers }));
   res.status(202).json({ job, node: { ...node, status: "updating" } });
 });
 
@@ -844,7 +905,7 @@ app.delete("/api/nodes/:id", async (req, res) => {
       jobId: job.id
     });
   });
-  queueMicrotask(() => runDeleteNodeJob(job, { server, node }));
+  deferJob(() => runDeleteNodeJob(job, { server, node }));
   res.status(202).json({ job, node: { ...node, status: "deleting" } });
 });
 
@@ -966,21 +1027,7 @@ app.post("/api/hooks/ipquality", async (req, res) => {
   const server = await requireReadyServer(data.serverId, res);
   if (!server) return;
 
-  const createIpQualityJob = (mode) => runServerAction({
-    type: "ipquality",
-    title: `IPQuality ${server.name} ${mode === "ipv6" ? "IPv6" : "IPv4"}`,
-    server,
-    extra: {
-      SIMPLEUI_IPQUALITY_MODE: mode,
-      SIMPLEUI_IPQUALITY_LANGUAGE: data.language,
-      SIMPLEUI_IPQUALITY_INTERFACE: data.interface?.trim(),
-      SIMPLEUI_IPQUALITY_PROXY: data.proxy?.trim(),
-      SIMPLEUI_IPQUALITY_FULL_IP: data.fullIp ? "1" : "0",
-      SIMPLEUI_IPQUALITY_PRIVACY: data.privacy ? "1" : "0"
-    },
-    secrets: [data.proxy],
-    timeoutMs: 30 * 60_000
-  });
+  const createIpQualityJob = (mode) => runServerAction(ipQualityJobOptions(server, data, mode));
 
   if (data.mode === "dual") {
     const jobs = [];
@@ -990,21 +1037,7 @@ app.post("/api/hooks/ipquality", async (req, res) => {
     return;
   }
 
-  const job = await runServerAction({
-    type: "ipquality",
-    title: `IPQuality ${server.name} ${data.mode === "ipv6" ? "IPv6" : "IPv4"}`,
-    server,
-    extra: {
-      SIMPLEUI_IPQUALITY_MODE: data.mode,
-      SIMPLEUI_IPQUALITY_LANGUAGE: data.language,
-      SIMPLEUI_IPQUALITY_INTERFACE: data.interface?.trim(),
-      SIMPLEUI_IPQUALITY_PROXY: data.proxy?.trim(),
-      SIMPLEUI_IPQUALITY_FULL_IP: data.fullIp ? "1" : "0",
-      SIMPLEUI_IPQUALITY_PRIVACY: data.privacy ? "1" : "0"
-    },
-    secrets: [data.proxy],
-    timeoutMs: 30 * 60_000
-  });
+  const job = await runServerAction(ipQualityJobOptions(server, data, data.mode));
   res.status(202).json({ job });
 });
 
@@ -1146,10 +1179,36 @@ if (fs.existsSync(clientDist)) {
   });
 }
 
-app.listen(port, host, () => {
+let initialSyncTimer = null;
+let syncTimer = null;
+
+const httpServer = app.listen(port, host, () => {
   console.log(`SimpleUI API listening on http://${host}:${port}`);
   if (syncIntervalMs > 0) {
-    setTimeout(() => syncAllStatuses().catch((error) => console.warn(`Initial status sync failed: ${error.message}`)), 1500);
-    setInterval(() => syncAllStatuses().catch((error) => console.warn(`Status sync failed: ${error.message}`)), syncIntervalMs);
+    initialSyncTimer = setTimeout(() => syncAllStatuses().catch((error) => console.warn(`Initial status sync failed: ${error.message}`)), 1500);
+    syncTimer = setInterval(() => syncAllStatuses().catch((error) => console.warn(`Status sync failed: ${error.message}`)), syncIntervalMs);
   }
 });
+
+let shuttingDown = false;
+function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`SimpleUI received ${signal}; shutting down gracefully.`);
+  if (initialSyncTimer) clearTimeout(initialSyncTimer);
+  if (syncTimer) clearInterval(syncTimer);
+  closeJobStreams();
+  abortHookRequests();
+  closeSshConnections();
+  httpServer.close(() => {
+    closeDb();
+    process.exit(0);
+  });
+  setTimeout(() => {
+    closeDb();
+    process.exit(1);
+  }, 8000).unref();
+}
+
+process.once("SIGTERM", () => shutdown("SIGTERM"));
+process.once("SIGINT", () => shutdown("SIGINT"));

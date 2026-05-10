@@ -55,6 +55,10 @@ export const api = {
     request(`/api/servers/${id}/hook/upgrade`, {
       method: "POST"
     }),
+  trustHookCertificate: (id) =>
+    request(`/api/servers/${id}/hook/trust`, {
+      method: "POST"
+    }),
   forceClearServer: (id) =>
     request(`/api/servers/${id}?force=1`, {
       method: "DELETE"

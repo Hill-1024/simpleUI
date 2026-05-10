@@ -62,6 +62,41 @@ export function hasNoShellControlChars(value) {
   return !/[\u0000\u007f]/.test(String(value || ""));
 }
 
+export function normalizeIpTarget(value) {
+  let raw = String(value || "").trim();
+  if (raw.startsWith("[") && raw.includes("]")) {
+    const host = raw.slice(1, raw.indexOf("]"));
+    const suffix = raw.slice(raw.indexOf("]") + 1);
+    raw = suffix.startsWith("/") ? `${host}${suffix}` : host;
+  } else if (raw.includes(".") && raw.split(":").length === 2) {
+    raw = raw.split(":")[0];
+  }
+  let [address, prefix] = raw.split("/");
+  let family = isIP(address);
+  if (!family) return null;
+  if (family === 6 && address.toLowerCase().startsWith("::ffff:")) {
+    const mapped = address.slice(7);
+    if (isIP(mapped) === 4) {
+      address = mapped;
+      family = 4;
+      if (prefix !== undefined) {
+        const mappedPrefix = Number(prefix);
+        if (!Number.isInteger(mappedPrefix) || mappedPrefix < 96 || mappedPrefix > 128) return null;
+        prefix = String(mappedPrefix - 96);
+      }
+    }
+  }
+  if (prefix !== undefined) {
+    if (!/^\d+$/.test(prefix)) return null;
+    const length = Number(prefix);
+    if ((family === 4 && length > 32) || (family === 6 && length > 128)) return null;
+    raw = `${address}/${length}`;
+  } else {
+    raw = address;
+  }
+  return { value: raw, family };
+}
+
 function originHost(host) {
   const clean = stripBracketedHost(host);
   return isIP(clean) === 6 ? `[${clean}]` : clean;
@@ -131,24 +166,89 @@ export function isAllowedOrigin(origin, allowedOrigins) {
 
 export function isSameHostOrigin(origin, hostHeader) {
   const parsed = parseHttpUrl(origin);
-  return Boolean(parsed && hostHeader && parsed.host === String(hostHeader));
+  const host = String(hostHeader || "").split(",")[0].trim();
+  return Boolean(parsed && host && parsed.host === host);
+}
+
+function splitHeaderValues(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function cleanForwardedValue(value) {
+  const clean = String(value || "").trim();
+  if (clean.startsWith('"') && clean.endsWith('"')) return clean.slice(1, -1);
+  return clean;
+}
+
+function forwardedHosts(req) {
+  const headers = req?.headers || {};
+  const hosts = [
+    ...splitHeaderValues(headers["x-forwarded-host"]),
+    ...splitHeaderValues(headers["x-original-host"]),
+    ...splitHeaderValues(headers["x-host"])
+  ];
+  for (const entry of splitHeaderValues(headers.forwarded)) {
+    for (const pair of entry.split(";")) {
+      const [rawKey, ...rawValue] = pair.split("=");
+      if (rawKey?.trim().toLowerCase() === "host") {
+        const host = cleanForwardedValue(rawValue.join("="));
+        if (host) hosts.push(host);
+      }
+    }
+  }
+  return [...new Set(hosts)];
+}
+
+function hasSameOriginFetchMetadata(req) {
+  return String(req?.headers?.["sec-fetch-site"] || "").toLowerCase() === "same-origin";
+}
+
+function isDevFrontendOrigin(origin, ports = []) {
+  const parsed = parseHttpUrl(origin);
+  if (!parsed) return false;
+  const port = Number(parsed.port || (parsed.protocol === "https:" ? 443 : 80));
+  return ports.includes(port);
 }
 
 export function isUnsafeMethod(method) {
   return UNSAFE_METHODS.has(String(method || "").toUpperCase());
 }
 
-export function isTrustedBrowserRequest(req, allowedOrigins) {
+export function isTrustedBrowserRequest(req, allowedOrigins, { trustProxy = false, devOriginPorts = [] } = {}) {
   const origin = req.headers.origin;
+  const sameHost = (value) =>
+    isSameHostOrigin(value, req.headers.host) ||
+    (trustProxy && forwardedHosts(req).some((host) => isSameHostOrigin(value, host)));
+
   if (origin) {
-    return isAllowedOrigin(origin, allowedOrigins) || isSameHostOrigin(origin, req.headers.host);
+    return isAllowedOrigin(origin, allowedOrigins) || isDevFrontendOrigin(origin, devOriginPorts) || sameHost(origin) || hasSameOriginFetchMetadata(req);
   }
 
   const referer = req.headers.referer;
   if (!referer) return true;
   const parsed = parseHttpUrl(referer);
   if (!parsed) return false;
-  return allowedOrigins.has(parsed.origin) || isSameHostOrigin(parsed.origin, req.headers.host);
+  return allowedOrigins.has(parsed.origin) || isDevFrontendOrigin(parsed.origin, devOriginPorts) || sameHost(parsed.origin) || hasSameOriginFetchMetadata(req);
+}
+
+export function buildContentSecurityPolicy() {
+  return {
+    useDefaults: true,
+    directives: {
+      "default-src": ["'self'"],
+      "script-src": ["'self'"],
+      "style-src": ["'self'", "'unsafe-inline'"],
+      "img-src": ["'self'", "data:"],
+      "connect-src": ["'self'"],
+      "frame-src": ["https:"],
+      "object-src": ["'none'"],
+      "base-uri": ["'self'"],
+      "frame-ancestors": ["'none'"]
+    }
+  };
 }
 
 export function sanitizeNodeSecrets(node = {}) {

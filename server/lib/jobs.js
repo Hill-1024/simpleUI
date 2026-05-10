@@ -2,15 +2,36 @@ import { EventEmitter } from "node:events";
 import { isIP } from "node:net";
 import { v4 as uuid } from "uuid";
 import { appendAudit, mutateDb, stamp } from "./db.js";
-import { buildHookUpgradeBundleB64, callHookAgent, checkHookHealth, installHookAgent } from "./hook-agent.js";
+import { buildHookUpgradeBundleB64, callHookAgent, checkHookHealth, installHookAgent, isHookFingerprintMismatch } from "./hook-agent.js";
 import { isDeployableProtocol, monitorProtocols, providers } from "./providers.js";
 import { collectNodeSecrets, sanitizeNodeSecrets } from "./security.js";
 
+const SERVER_SYNC_FAILURE_THRESHOLD = 3;
 const streams = new Map();
 
 function getStream(jobId) {
-  if (!streams.has(jobId)) streams.set(jobId, new EventEmitter());
+  if (!streams.has(jobId)) {
+    const stream = new EventEmitter();
+    stream.setMaxListeners(100);
+    streams.set(jobId, stream);
+  }
   return streams.get(jobId);
+}
+
+function deferJob(runner) {
+  queueMicrotask(() => {
+    Promise.resolve()
+      .then(runner)
+      .catch((error) => console.warn(`Deferred job failed before its own error handler: ${error.message}`));
+  });
+}
+
+export function closeJobStreams() {
+  for (const stream of streams.values()) {
+    stream.emit("done", { status: "closed", error: "Server is shutting down" });
+    stream.removeAllListeners();
+  }
+  streams.clear();
 }
 
 function redact(text, secrets = []) {
@@ -92,6 +113,25 @@ function serverEnv({ action, extra = {} }) {
     SIMPLEUI_ACTION: action,
     ...extra
   };
+}
+
+function isTransientHookError(error) {
+  return /timed out|timeout|socket hang up|ECONNRESET|ECONNREFUSED|EHOSTUNREACH|ENETUNREACH|ETIMEDOUT|fetch failed/i
+    .test(error.message || "");
+}
+
+async function callHookAgentWithRetry(options, { attempts = 2, delayMs = 800 } = {}) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await callHookAgent(options);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= attempts || !isTransientHookError(error)) throw error;
+      await new Promise((resolve) => setTimeout(resolve, delayMs * attempt));
+    }
+  }
+  throw lastError;
 }
 
 function parseMarker(output, marker) {
@@ -750,6 +790,7 @@ export async function applyServerStatusResult({ server, status, audit = false })
     const rates = networkRates(savedServer.metrics, status.network, timestamp);
     savedServer.status = "online";
     savedServer.hookStatus = "online";
+    savedServer.hookTlsError = "";
     savedServer.metrics = {
       ...status,
       network: {
@@ -757,7 +798,8 @@ export async function applyServerStatusResult({ server, status, audit = false })
         ...rates
       },
       updatedAt: timestamp,
-      lastSyncError: ""
+      lastSyncError: "",
+      syncFailureCount: 0
     };
     savedServer.updatedAt = timestamp;
     if (audit) appendAudit(state, "server.status.refresh", `${server.name} server status refreshed`, { serverId: server.id });
@@ -769,18 +811,39 @@ export async function applyServerStatusResult({ server, status, audit = false })
   });
 }
 
-async function markServerSyncFailed(server, error, { keepOnline = false } = {}) {
+function isHookAuthFailure(error) {
+  return /unauthorized|forbidden|returned 401|returned 403/i.test(error.message || "");
+}
+
+export async function markServerSyncFailed(server, error, { keepOnline = false } = {}) {
   const timestamp = new Date().toISOString();
   await mutateDb((state) => {
     const savedServer = state.servers.find((item) => item.id === server.id);
     if (!savedServer) return;
-    savedServer.status = keepOnline ? "online" : "warning";
-    savedServer.hookStatus = keepOnline
+    const fingerprintMismatch = isHookFingerprintMismatch(error);
+    const legacyTransport = /legacy HTTP transport/i.test(error.message || "");
+    const authFailure = isHookAuthFailure(error);
+    const previousFailureCount = Number(savedServer.metrics?.syncFailureCount || 0);
+    const syncFailureCount = (fingerprintMismatch || authFailure || keepOnline || legacyTransport)
+      ? previousFailureCount
+      : previousFailureCount + 1;
+    const keepHookReady = (keepOnline || legacyTransport) ||
+      (!fingerprintMismatch &&
+        !authFailure &&
+        syncFailureCount < SERVER_SYNC_FAILURE_THRESHOLD &&
+        ["online", "warning", "rebooting"].includes(savedServer.hookStatus || savedServer.status));
+
+    savedServer.status = "warning";
+    savedServer.hookStatus = keepHookReady
       ? "online"
       : (savedServer.hookStatus === "deleting" ? savedServer.hookStatus : "unreachable");
+    savedServer.hookTlsError = fingerprintMismatch ? "fingerprint-mismatch" : "";
     savedServer.metrics = {
       ...(savedServer.metrics || {}),
-      lastSyncError: error.message,
+      lastSyncError: fingerprintMismatch
+        ? "Hook TLS certificate fingerprint mismatch. Trust the current certificate or reinstall the hook."
+        : error.message,
+      syncFailureCount,
       updatedAt: timestamp
     };
     savedServer.updatedAt = timestamp;
@@ -801,26 +864,27 @@ async function markNodeSyncFailed(node, error) {
 export async function syncServerAndNodes({ server, nodes = [] }) {
   const errors = [];
   try {
-    const result = await callHookAgent({
+    const result = await callHookAgentWithRetry({
       server,
       action: "server-status",
       env: serverEnv({ action: "server-status" }),
-      timeoutMs: 30_000
+      timeoutMs: 60_000
     });
     const parsed = parseMarker(result.output || "", "__SIMPLEUI_SERVER_STATUS__");
     await applyServerStatusResult({ server, status: parsed });
   } catch (error) {
     errors.push(error);
     const unsupportedServerStatus = /unsupported action|server-status/i.test(error.message || "");
-    await markServerSyncFailed(server, error, { keepOnline: unsupportedServerStatus });
-    if (!unsupportedServerStatus) {
+    const legacyTransport = /legacy HTTP transport/i.test(error.message || "");
+    await markServerSyncFailed(server, error, { keepOnline: unsupportedServerStatus || legacyTransport });
+    if (!unsupportedServerStatus && !legacyTransport) {
       return { ok: false, errors: errors.map((item) => item.message) };
     }
   }
 
   for (const node of nodes) {
     try {
-      const result = await callHookAgent({
+      const result = await callHookAgentWithRetry({
         server,
         action: "status",
         env: nodeEnv({ node, users: [], action: "status" }),
@@ -951,12 +1015,16 @@ export async function runInstallHookJob(job, { server, credential, hookPort, tok
       onLog: (line) => logJob(job.id, line, secrets)
     });
     const result = parseMarker(remote.output, "__SIMPLEUI_RESULT__") || {};
-    const hookUrl = `http://${formatEndpointHost(server.host)}:${Number(result.port || hookPort)}`;
+    const secretResult = parseMarker(remote.output, "__SIMPLEUI_SECRET_RESULT__") || {};
+    const hookToken = secretResult.hookToken || token;
+    if (hookToken && !secrets.includes(hookToken)) secrets.push(hookToken);
+    const hookUrl = `https://${formatEndpointHost(server.host)}:${Number(result.port || hookPort)}`;
     const nextServer = {
       ...server,
       hookUrl,
       hookPort: Number(result.port || hookPort),
-      hookToken: token
+      hookToken,
+      hookCertFingerprint: result.fingerprint || result.certFingerprint || server.hookCertFingerprint
     };
     const reachable = await checkHookHealth(nextServer);
 
@@ -1049,11 +1117,22 @@ export async function runHookUpgradeJob(job, { server }) {
     }
     await logJob(job.id, stripMarker(result.output || "", ["__SIMPLEUI_RESULT__"]), secrets);
     const parsed = parseMarker(result.output || "", "__SIMPLEUI_RESULT__") || { ok: true };
+    const nextServer = parsed.fingerprint
+      ? {
+          ...server,
+          hookUrl: `https://${formatEndpointHost(server.host)}:${Number(server.hookPort || 37877)}`,
+          hookCertFingerprint: parsed.fingerprint
+        }
+      : server;
     await new Promise((resolve) => setTimeout(resolve, 2500));
-    const reachable = await checkHookHealth(server, 10_000);
+    const reachable = await checkHookHealth(nextServer, 10_000);
     await mutateDb((state) => {
       const savedServer = state.servers.find((item) => item.id === server.id);
       if (savedServer) {
+        Object.assign(savedServer, {
+          hookUrl: nextServer.hookUrl,
+          hookCertFingerprint: nextServer.hookCertFingerprint
+        });
         savedServer.status = reachable ? "online" : "warning";
         savedServer.hookStatus = reachable ? "online" : "unreachable";
         savedServer.updatedAt = new Date().toISOString();
@@ -1065,7 +1144,7 @@ export async function runHookUpgradeJob(job, { server }) {
         { serverId: server.id, jobId: job.id }
       );
     });
-    const jobResult = { ...parsed, reachable };
+    const jobResult = { ...parsed, reachable, hookUrl: nextServer.hookUrl };
     await patchJob(job.id, { status: reachable ? "success" : "failed", result: jobResult, error: reachable ? "" : "Hook upgraded but health check failed" });
     await logJob(job.id, reachable ? "Hook agent upgraded and reachable.\n" : "Hook upgraded, but health check failed after restart.\n", secrets);
     getStream(job.id).emit("done", reachable
@@ -1277,7 +1356,7 @@ export async function runDeleteNodeJob(job, { server, node }) {
 export async function runRemoteAction({ type, title, server, node, extra = {}, remoteAction = type }) {
   const job = await createJob({ type, title, payload: { server, node } });
   const secrets = [extra?.target, extra?.SIMPLEUI_BAN_IP, server?.hookToken];
-  queueMicrotask(async () => {
+  deferJob(async () => {
     await patchJob(job.id, { status: "running" });
     try {
       const result = await callHookAgent({
@@ -1341,7 +1420,7 @@ export async function runRemoteAction({ type, title, server, node, extra = {}, r
 export async function runServerAction({ type, title, server, extra = {}, secrets = [], timeoutMs = 180_000 }) {
   const job = await createJob({ type, title, payload: { server } });
   const secretValues = [server?.hookToken, ...secrets].flat();
-  queueMicrotask(async () => {
+  deferJob(async () => {
     await patchJob(job.id, { status: "running" });
     if (type === "server-reboot") {
       await mutateDb((state) => {
