@@ -221,6 +221,21 @@ import tempfile
 ROOT = "/opt/simpleui-hook"
 HOOK_DIR = os.path.join(ROOT, "hooks")
 bundle_path = sys.argv[1]
+OBSOLETE_HOOKS = {
+    "agent-upgrade.sh",
+    "ban.sh",
+    "common.sh",
+    "exec.sh",
+    "hysteria2-deploy.sh",
+    "ipquality.sh",
+    "optimize.sh",
+    "server-reboot.sh",
+    "server-status.sh",
+    "service.sh",
+    "status.sh",
+    "trojan-deploy.sh",
+    "uninstall.sh",
+}
 
 def emit(payload):
     print("__SIMPLEUI_RESULT__" + json.dumps(payload, ensure_ascii=False))
@@ -277,15 +292,29 @@ def atomic_write(path, content, mode):
 
 atomic_write(os.path.join(ROOT, "agent.py"), agent, 0o700)
 written = []
+def valid_hook_name(name):
+    return (
+        isinstance(name, str)
+        and name not in {"", ".", ".."}
+        and "/" not in name
+        and "\\" not in name
+        and name.endswith(".py")
+    )
+
 for item in hooks:
     name = item.get("name") if isinstance(item, dict) else None
     content = item.get("content") if isinstance(item, dict) else None
-    if not isinstance(name, str) or "/" in name or not name.endswith(".sh"):
+    if not valid_hook_name(name):
         raise ValueError(f"invalid hook script name: {name!r}")
     if not isinstance(content, str):
         raise ValueError(f"invalid hook script content: {name}")
     atomic_write(os.path.join(HOOK_DIR, name), content, 0o700)
     written.append(name)
+for stale_name in OBSOLETE_HOOKS - set(written):
+    try:
+        os.unlink(os.path.join(HOOK_DIR, stale_name))
+    except OSError:
+        pass
 
 try:
     os.unlink(bundle_path)
@@ -314,7 +343,7 @@ emit({
 function shouldFallbackHookUpgrade(error) {
   const message = String(error?.message || "");
   if (/unauthorized|hook is not installed/i.test(message)) return false;
-  return /Missing hook upgrade bundle|request body too large|Argument list too long|unsupported action/i.test(message);
+  return /Missing hook upgrade bundle|request body too large|Argument list too long|unsupported action|invalid hook script name/i.test(message);
 }
 
 async function upgradeHookViaChunkedExec({ server, bundle, jobId, secrets }) {

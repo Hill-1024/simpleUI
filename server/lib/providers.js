@@ -167,7 +167,7 @@ export const providers = {
     deployable: true,
     upstream: "https://github.com/xyz690/Trojan",
     branch: "master",
-    installMode: "shell",
+    installMode: "python",
     installEntrypoints: [
       "https://raw.githubusercontent.com/xyz690/Trojan/master/trojan_install.sh"
     ],
@@ -188,7 +188,7 @@ export const providers = {
       "service-control"
     ],
     notes:
-      "Wraps xyz690/Trojan's installer and then writes the same single-password server.conf auth shape as the upstream CLI."
+      "Uses a native Python deployment hook that preserves the upstream ACME/nginx/Trojan behavior tree and writes the same single-password server.conf auth shape as the upstream CLI."
   }
 };
 

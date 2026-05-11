@@ -1,159 +1,15 @@
-#!/usr/bin/env bash
-
-sample_delay="${SIMPLEUI_STATUS_SAMPLE_DELAY:-0.25}"
-
-python3 - "$sample_delay" <<'PY'
+#!/usr/bin/env python3
+import ipaddress
 import json
 import os
 import platform
+import shlex
 import socket
 import subprocess
-import sys
 import time
 
-sample_delay = float(sys.argv[1] or 0.25)
+import common
 
-def read_cpu():
-    with open("/proc/stat", "r", encoding="utf-8", errors="ignore") as handle:
-        parts = handle.readline().split()[1:]
-    values = [int(item) for item in parts]
-    idle = values[3] + (values[4] if len(values) > 4 else 0)
-    total = sum(values)
-    return idle, total
-
-def cpu_usage():
-    try:
-        idle_a, total_a = read_cpu()
-        time.sleep(max(0.05, min(sample_delay, 1.0)))
-        idle_b, total_b = read_cpu()
-        total_delta = max(1, total_b - total_a)
-        idle_delta = max(0, idle_b - idle_a)
-        return round(max(0.0, min(100.0, (1 - idle_delta / total_delta) * 100)), 2)
-    except Exception:
-        return None
-
-def meminfo():
-    values = {}
-    try:
-        with open("/proc/meminfo", "r", encoding="utf-8", errors="ignore") as handle:
-            for line in handle:
-                key, raw = line.split(":", 1)
-                values[key] = int(raw.strip().split()[0]) * 1024
-    except Exception:
-        return {}
-    total = values.get("MemTotal", 0)
-    available = values.get("MemAvailable", values.get("MemFree", 0))
-    used = max(0, total - available)
-    return {
-        "total": total,
-        "used": used,
-        "available": available,
-        "usedPercent": round((used / total) * 100, 2) if total else 0,
-    }
-
-def disk_usage(path="/"):
-    try:
-        stat = os.statvfs(path)
-        total = stat.f_blocks * stat.f_frsize
-        available = stat.f_bavail * stat.f_frsize
-        used = max(0, total - available)
-        return {
-            "mount": path,
-            "total": total,
-            "used": used,
-            "available": available,
-            "usedPercent": round((used / total) * 100, 2) if total else 0,
-        }
-    except Exception:
-        return {"mount": path, "total": 0, "used": 0, "available": 0, "usedPercent": 0}
-
-def filesystems():
-    rows = []
-    try:
-        output = subprocess.check_output(["df", "-P", "-B1"], text=True, stderr=subprocess.DEVNULL)
-    except Exception:
-        return rows
-    for line in output.splitlines()[1:]:
-        parts = line.split()
-        if len(parts) < 6:
-            continue
-        source, total, used, available, percent, mount = parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]
-        if source.startswith(("tmpfs", "devtmpfs", "overlay")) and mount not in {"/"}:
-            continue
-        try:
-            total_i = int(total)
-            used_i = int(used)
-            available_i = int(available)
-        except ValueError:
-            continue
-        rows.append({
-            "source": source,
-            "mount": mount,
-            "total": total_i,
-            "used": used_i,
-            "available": available_i,
-            "usedPercent": round((used_i / total_i) * 100, 2) if total_i else 0,
-            "percent": percent,
-        })
-    return rows[:12]
-
-def network():
-    interfaces = []
-    total_rx = 0
-    total_tx = 0
-    try:
-        with open("/proc/net/dev", "r", encoding="utf-8", errors="ignore") as handle:
-            lines = handle.readlines()[2:]
-    except Exception:
-        lines = []
-    for line in lines:
-        if ":" not in line:
-            continue
-        name, rest = line.split(":", 1)
-        name = name.strip()
-        values = rest.split()
-        if len(values) < 16:
-            continue
-        rx = int(values[0])
-        tx = int(values[8])
-        interfaces.append({"name": name, "rx": rx, "tx": tx})
-        if name != "lo":
-            total_rx += rx
-            total_tx += tx
-    return {
-        "rx": total_rx,
-        "tx": total_tx,
-        "interfaces": interfaces,
-    }
-
-def uptime_seconds():
-    try:
-        with open("/proc/uptime", "r", encoding="utf-8", errors="ignore") as handle:
-            return int(float(handle.read().split()[0]))
-    except Exception:
-        return 0
-
-def os_release():
-    values = {}
-    try:
-        with open("/etc/os-release", "r", encoding="utf-8", errors="ignore") as handle:
-            for line in handle:
-                if "=" not in line:
-                    continue
-                key, value = line.rstrip().split("=", 1)
-                values[key] = value.strip('"')
-    except Exception:
-        pass
-    return values.get("PRETTY_NAME") or values.get("NAME") or platform.platform()
-
-def service_state(name):
-    if not name:
-        return "unknown"
-    try:
-        proc = subprocess.run(["systemctl", "is-active", name], text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        return proc.stdout.strip() or "unknown"
-    except Exception:
-        return "unknown"
 
 SERVICE_BY_PROTOCOL = {
     "hysteria2": "hysteria-server.service",
@@ -196,8 +52,133 @@ SING_BOX_CONFIG_CANDIDATES = [
     "/opt/sing-box/config.json",
 ]
 
+
+def sample_delay():
+    try:
+        return float(os.environ.get("SIMPLEUI_STATUS_SAMPLE_DELAY", "0.25") or "0.25")
+    except ValueError:
+        return 0.25
+
+
+def read_cpu():
+    parts = common.read_text("/proc/stat").splitlines()[0].split()[1:]
+    values = [int(item) for item in parts]
+    idle = values[3] + (values[4] if len(values) > 4 else 0)
+    return idle, sum(values)
+
+
+def cpu_usage():
+    try:
+        idle_a, total_a = read_cpu()
+        time.sleep(max(0.05, min(sample_delay(), 1.0)))
+        idle_b, total_b = read_cpu()
+        total_delta = max(1, total_b - total_a)
+        idle_delta = max(0, idle_b - idle_a)
+        return round(max(0.0, min(100.0, (1 - idle_delta / total_delta) * 100)), 2)
+    except Exception:
+        return None
+
+
+def meminfo():
+    values = {}
+    for line in common.read_text("/proc/meminfo").splitlines():
+        if ":" not in line:
+            continue
+        key, raw = line.split(":", 1)
+        values[key] = common.safe_int(raw.strip().split()[0]) * 1024
+    total = values.get("MemTotal", 0)
+    available = values.get("MemAvailable", values.get("MemFree", 0))
+    used = max(0, total - available)
+    return {
+        "total": total,
+        "used": used,
+        "available": available,
+        "usedPercent": round((used / total) * 100, 2) if total else 0,
+    }
+
+
+def disk_usage(path="/"):
+    try:
+        stat = os.statvfs(path)
+        total = stat.f_blocks * stat.f_frsize
+        available = stat.f_bavail * stat.f_frsize
+        used = max(0, total - available)
+        return {
+            "mount": path,
+            "total": total,
+            "used": used,
+            "available": available,
+            "usedPercent": round((used / total) * 100, 2) if total else 0,
+        }
+    except Exception:
+        return {"mount": path, "total": 0, "used": 0, "available": 0, "usedPercent": 0}
+
+
+def filesystems():
+    rows = []
+    output = common.capture(["df", "-P", "-B1"])
+    for line in output.splitlines()[1:]:
+        parts = line.split()
+        if len(parts) < 6:
+            continue
+        source, total, used, available, percent, mount = parts[:6]
+        if source.startswith(("tmpfs", "devtmpfs", "overlay")) and mount != "/":
+            continue
+        total_i = common.safe_int(total)
+        used_i = common.safe_int(used)
+        available_i = common.safe_int(available)
+        rows.append({
+            "source": source,
+            "mount": mount,
+            "total": total_i,
+            "used": used_i,
+            "available": available_i,
+            "usedPercent": round((used_i / total_i) * 100, 2) if total_i else 0,
+            "percent": percent,
+        })
+    return rows[:12]
+
+
+def network():
+    interfaces = []
+    total_rx = 0
+    total_tx = 0
+    for line in common.read_text("/proc/net/dev").splitlines()[2:]:
+        if ":" not in line:
+            continue
+        name, rest = line.split(":", 1)
+        values = rest.split()
+        if len(values) < 16:
+            continue
+        rx = common.safe_int(values[0])
+        tx = common.safe_int(values[8])
+        name = name.strip()
+        interfaces.append({"name": name, "rx": rx, "tx": tx})
+        if name != "lo":
+            total_rx += rx
+            total_tx += tx
+    return {"rx": total_rx, "tx": total_tx, "interfaces": interfaces}
+
+
+def uptime_seconds():
+    try:
+        return int(float(common.read_text("/proc/uptime").split()[0]))
+    except Exception:
+        return 0
+
+
+def os_release():
+    values = {}
+    for line in common.read_text("/etc/os-release").splitlines():
+        if "=" in line:
+            key, value = line.rstrip().split("=", 1)
+            values[key] = value.strip('"')
+    return values.get("PRETTY_NAME") or values.get("NAME") or platform.platform()
+
+
 def protocol_name(protocol):
     return PROTOCOL_META.get(protocol, {}).get("name") or protocol
+
 
 def protocol_service_proto(protocol, network=""):
     configured = str(network or "").strip().lower()
@@ -210,16 +191,13 @@ def protocol_service_proto(protocol, network=""):
             return ",".join(values)
     return PROTOCOL_META.get(protocol, {}).get("serviceProtocol") or "tcp"
 
+
 def service_unit_exists(service):
     if not service:
         return False
-    try:
-        proc = subprocess.run(["systemctl", "cat", service], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if proc.returncode == 0:
-            return True
-    except Exception:
-        pass
-    return os.path.exists(f"/etc/systemd/system/{service}") or os.path.exists(f"/lib/systemd/system/{service}")
+    proc = common.run(["systemctl", "cat", service], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return proc.returncode == 0 or os.path.exists(f"/etc/systemd/system/{service}") or os.path.exists(f"/lib/systemd/system/{service}")
+
 
 def first_existing_service(candidates):
     for service in candidates:
@@ -227,91 +205,48 @@ def first_existing_service(candidates):
             return service
     return candidates[0] if candidates else ""
 
+
 def managed_protocols():
-    protocols = []
-    try:
-        with open("/etc/simpleui/managed-protocols", "r", encoding="utf-8", errors="ignore") as handle:
-            protocols = [line.strip() for line in handle if line.strip()]
-    except Exception:
+    protocols = [line.strip() for line in common.read_text("/etc/simpleui/managed-protocols").splitlines() if line.strip()]
+    if not protocols:
         for protocol in SERVICE_BY_PROTOCOL:
             if os.path.isdir(f"/etc/simpleui/{protocol}"):
                 protocols.append(protocol)
     return [protocol for protocol in dict.fromkeys(protocols) if protocol in SERVICE_BY_PROTOCOL]
 
+
 def managed_services():
-    services = [
-        {
-            "protocol": protocol,
-            "service": SERVICE_BY_PROTOCOL.get(protocol, ""),
-            "active": service_state(SERVICE_BY_PROTOCOL.get(protocol, "")) if SERVICE_BY_PROTOCOL.get(protocol) else "unknown",
-        }
-        for protocol in managed_protocols()
-    ]
+    services = [{
+        "protocol": protocol,
+        "service": SERVICE_BY_PROTOCOL.get(protocol, ""),
+        "active": common.service_state(SERVICE_BY_PROTOCOL.get(protocol, "")) if SERVICE_BY_PROTOCOL.get(protocol) else "unknown",
+    } for protocol in managed_protocols()]
     sing_box_service = first_existing_service(SING_BOX_SERVICES)
     if sing_box_service and service_unit_exists(sing_box_service):
-        services.append({
-            "protocol": "sing-box",
-            "service": sing_box_service,
-            "active": service_state(sing_box_service),
-        })
+        services.append({"protocol": "sing-box", "service": sing_box_service, "active": common.service_state(sing_box_service)})
     return services
 
-def read_env_file(path):
-    values = {}
-    try:
-        with open(path, "r", encoding="utf-8", errors="ignore") as handle:
-            for line in handle:
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, value = line.split("=", 1)
-                key = key.strip()
-                value = value.strip()
-                if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-                    value = value[1:-1]
-                if key.startswith("SIMPLEUI_"):
-                    values[key] = value
-    except Exception:
-        pass
-    return values
-
-def int_or_none(value):
-    try:
-        number = int(str(value or "").strip())
-        return number if 1 <= number <= 65535 else None
-    except Exception:
-        return None
 
 def read_kv_usernames(path):
     usernames = []
-    try:
-        with open(path, "r", encoding="utf-8", errors="ignore") as handle:
-            for raw in handle:
-                if ":" not in raw:
-                    continue
-                username, _ = raw.split(":", 1)
-                username = username.strip()
-                if username:
-                    usernames.append(username)
-    except Exception:
-        pass
+    for raw in common.read_text(path).splitlines():
+        if ":" not in raw:
+            continue
+        username, _ = raw.split(":", 1)
+        username = username.strip()
+        if username:
+            usernames.append(username)
     return usernames
 
+
 def read_json_usernames(path):
-    try:
-        with open(path, "r", encoding="utf-8", errors="ignore") as handle:
-            data = json.load(handle)
-    except Exception:
-        return []
+    data = common.read_json(path)
     if isinstance(data, dict):
         return [str(key).strip() for key in data if str(key).strip()]
     if isinstance(data, list):
-        names = []
-        for item in data:
-            if isinstance(item, dict) and str(item.get("username", "")).strip():
-                names.append(str(item.get("username")).strip())
-        return names
+        return [str(item.get("username", "")).strip() for item in data if isinstance(item, dict) and str(item.get("username", "")).strip()]
     return []
+
 
 def unique_strings(values):
     output = []
@@ -322,6 +257,7 @@ def unique_strings(values):
             seen.add(text)
             output.append(text)
     return output
+
 
 def strip_json_comments(text):
     output = []
@@ -361,17 +297,16 @@ def strip_json_comments(text):
         index += 1
     return "".join(output)
 
+
 def read_json_file(path):
     try:
-        with open(path, "r", encoding="utf-8", errors="ignore") as handle:
-            raw = handle.read()
-        return json.loads(strip_json_comments(raw))
+        return json.loads(strip_json_comments(common.read_text(path)))
     except Exception:
         return None
 
+
 def normalize_blacklist_target(raw):
     try:
-        import ipaddress
         text = str(raw or "").strip()
         if not text:
             return None
@@ -384,20 +319,18 @@ def normalize_blacklist_target(raw):
     except Exception:
         return None
 
+
 def read_legacy_blacklist_targets():
     targets = []
-    try:
-        with open("/etc/simpleui/banned-source-ips.txt", "r", encoding="utf-8", errors="ignore") as handle:
-            for line in handle:
-                normalized = normalize_blacklist_target(line.strip())
-                if normalized:
-                    targets.append(normalized)
-    except Exception:
-        pass
+    for line in common.read_text("/etc/simpleui/banned-source-ips.txt").splitlines():
+        normalized = normalize_blacklist_target(line.strip())
+        if normalized:
+            targets.append(normalized)
     unique = {}
     for item in targets:
         unique[item["target"]] = item
     return list(unique.values())
+
 
 def discover_blacklists(discovered_nodes):
     records = []
@@ -433,12 +366,11 @@ def discover_blacklists(discovered_nodes):
                 "updatedAt": entry.get("updatedAt"),
             })
 
-    legacy_targets = read_legacy_blacklist_targets()
     for node in discovered_nodes:
         remote_key = str(node.get("remoteKey") or "").strip()
         if not remote_key:
             continue
-        for target in legacy_targets:
+        for target in read_legacy_blacklist_targets():
             key = (remote_key, target["target"])
             if key in seen:
                 continue
@@ -457,21 +389,18 @@ def discover_blacklists(discovered_nodes):
             })
     return records
 
+
 def systemd_exec_configs(service):
     configs = []
     if not service:
         return configs
-    try:
-        output = subprocess.check_output(["systemctl", "cat", service], text=True, stderr=subprocess.DEVNULL)
-    except Exception:
-        return configs
+    output = common.capture(["systemctl", "cat", service])
     tokens = []
     for raw in output.splitlines():
         line = raw.strip()
         if not line.startswith("ExecStart="):
             continue
         try:
-            import shlex
             tokens.extend(shlex.split(line.split("=", 1)[1]))
         except Exception:
             tokens.extend(line.split())
@@ -482,6 +411,7 @@ def systemd_exec_configs(service):
             configs.append(token.split("=", 1)[1])
     return configs
 
+
 def sing_box_config_paths(service):
     paths = []
     for path in systemd_exec_configs(service) + SING_BOX_CONFIG_CANDIDATES:
@@ -490,26 +420,26 @@ def sing_box_config_paths(service):
             paths.append(clean)
     return paths
 
+
 def endpoint_host_from_listen(listen):
     value = str(listen or "").strip()
-    if value in {"", "::", "0.0.0.0", "[::]", "*"}:
-        return ""
-    return value
+    return "" if value in {"", "::", "0.0.0.0", "[::]", "*"} else value
+
 
 def sing_box_usernames(inbound):
     names = []
     for item in inbound.get("users") or []:
-        if not isinstance(item, dict):
-            continue
-        names.append(item.get("name") or item.get("username") or item.get("uuid") or "")
+        if isinstance(item, dict):
+            names.append(item.get("name") or item.get("username") or item.get("uuid") or "")
     return unique_strings(names)
+
 
 def discover_sing_box_nodes(skip_pairs):
     nodes = []
     service = first_existing_service(SING_BOX_SERVICES)
     if not service or not service_unit_exists(service):
         return nodes
-    active = service_state(service)
+    active = common.service_state(service)
     for config_path in sing_box_config_paths(service):
         config = read_json_file(config_path)
         if not isinstance(config, dict):
@@ -520,48 +450,36 @@ def discover_sing_box_nodes(skip_pairs):
             protocol = str(inbound.get("type") or "").strip().lower()
             if protocol not in SING_BOX_INBOUND_PROTOCOLS:
                 continue
-            port = int_or_none(inbound.get("listen_port"))
-            if not port:
-                continue
-            pair = (protocol, port)
-            if pair in skip_pairs:
+            port = common.int_or_none(inbound.get("listen_port"))
+            if not port or (protocol, port) in skip_pairs:
                 continue
             tag = str(inbound.get("tag") or f"{protocol}-{index + 1}").strip()
-            listen = endpoint_host_from_listen(inbound.get("listen"))
-            service_protocol = protocol_service_proto(protocol, inbound.get("network", ""))
             tls = inbound.get("tls") if isinstance(inbound.get("tls"), dict) else {}
-            cert_path = tls.get("certificate_path") or tls.get("certificate") or ""
-            key_path = tls.get("key_path") or tls.get("key") or ""
             nodes.append({
                 "protocol": protocol,
                 "name": f"{protocol_name(protocol)} {tag}",
                 "service": service,
-                "serviceProtocol": service_protocol,
+                "serviceProtocol": protocol_service_proto(protocol, inbound.get("network", "")),
                 "configPath": config_path,
                 "remoteKey": f"sing-box:{config_path}:inbound:{tag}:{port}",
                 "domain": "",
-                "connectHost": listen,
+                "connectHost": endpoint_host_from_listen(inbound.get("listen")),
                 "listenPort": port,
                 "active": active,
                 "users": sing_box_usernames(inbound),
                 "managedBy": "sing-box",
                 "importSource": "sing-box-discovery",
                 "monitorOnly": True,
-                "certPath": cert_path,
-                "keyPath": key_path,
+                "certPath": tls.get("certificate_path") or tls.get("certificate") or "",
+                "keyPath": tls.get("key_path") or tls.get("key") or "",
                 "tag": tag,
             })
         for index, endpoint in enumerate(config.get("endpoints") or []):
             if not isinstance(endpoint, dict):
                 continue
             protocol = str(endpoint.get("type") or "").strip().lower()
-            if protocol != "wireguard":
-                continue
-            port = int_or_none(endpoint.get("listen_port"))
-            if not port:
-                continue
-            pair = (protocol, port)
-            if pair in skip_pairs:
+            port = common.int_or_none(endpoint.get("listen_port"))
+            if protocol != "wireguard" or not port or (protocol, port) in skip_pairs:
                 continue
             tag = str(endpoint.get("tag") or endpoint.get("name") or f"wireguard-{index + 1}").strip()
             nodes.append({
@@ -583,17 +501,18 @@ def discover_sing_box_nodes(skip_pairs):
             })
     return nodes
 
+
 def discover_nodes():
     nodes = []
     skip_pairs = set()
     for protocol in managed_protocols():
         env_path = f"/etc/simpleui/{protocol}/managed.env"
-        env = read_env_file(env_path)
+        env = common.read_env_file(env_path)
         if not env and not os.path.isdir(f"/etc/simpleui/{protocol}"):
             continue
         service = env.get("SIMPLEUI_SERVICE") or SERVICE_BY_PROTOCOL.get(protocol, "")
         config = env.get("SIMPLEUI_CONFIG") or CONFIG_BY_PROTOCOL.get(protocol, "")
-        port = int_or_none(env.get("SIMPLEUI_PORT")) or (443 if protocol in {"hysteria2", "trojan"} else None)
+        port = common.int_or_none(env.get("SIMPLEUI_PORT")) or (443 if protocol in {"hysteria2", "trojan"} else None)
         if port:
             skip_pairs.add((protocol, port))
         domain = env.get("SIMPLEUI_DOMAIN", "")
@@ -613,7 +532,7 @@ def discover_nodes():
             "domain": domain,
             "connectHost": connect_host,
             "listenPort": port,
-            "active": service_state(service) if service else "unknown",
+            "active": common.service_state(service) if service else "unknown",
             "users": users,
             "managedEnvPath": env_path,
             "managedBy": "simpleui",
@@ -621,8 +540,8 @@ def discover_nodes():
             "monitorOnly": False,
         }
         if protocol == "hysteria2":
-            jump_start = int_or_none(env.get("SIMPLEUI_JUMP_PORT_START"))
-            jump_end = int_or_none(env.get("SIMPLEUI_JUMP_PORT_END"))
+            jump_start = common.int_or_none(env.get("SIMPLEUI_JUMP_PORT_START"))
+            jump_end = common.int_or_none(env.get("SIMPLEUI_JUMP_PORT_END"))
             node.update({
                 "tlsMode": env.get("SIMPLEUI_TLS_MODE") or "acme-http",
                 "selfSignedHost": connect_host if env.get("SIMPLEUI_TLS_MODE") == "self-signed" else "",
@@ -643,27 +562,32 @@ def discover_nodes():
     nodes.extend(discover_sing_box_nodes(skip_pairs))
     return nodes
 
-discovered_nodes = discover_nodes()
-load1, load5, load15 = os.getloadavg() if hasattr(os, "getloadavg") else (0, 0, 0)
-payload = {
-    "hostname": socket.gethostname(),
-    "os": os_release(),
-    "kernel": platform.release(),
-    "uptimeSeconds": uptime_seconds(),
-    "cpu": {
-        "usagePercent": cpu_usage(),
-        "load1": round(load1, 2),
-        "load5": round(load5, 2),
-        "load15": round(load15, 2),
-        "cores": os.cpu_count() or 0,
-    },
-    "memory": meminfo(),
-    "disk": disk_usage("/"),
-    "filesystems": filesystems(),
-    "network": network(),
-    "managedServices": managed_services(),
-    "discoveredNodes": discovered_nodes,
-    "blacklists": discover_blacklists(discovered_nodes),
-}
-print("__SIMPLEUI_SERVER_STATUS__" + json.dumps(payload, ensure_ascii=False))
-PY
+
+def main():
+    common.bootstrap()
+    discovered_nodes = discover_nodes()
+    load1, load5, load15 = os.getloadavg() if hasattr(os, "getloadavg") else (0, 0, 0)
+    common.emit("__SIMPLEUI_SERVER_STATUS__", {
+        "hostname": socket.gethostname(),
+        "os": os_release(),
+        "kernel": platform.release(),
+        "uptimeSeconds": uptime_seconds(),
+        "cpu": {
+            "usagePercent": cpu_usage(),
+            "load1": round(load1, 2),
+            "load5": round(load5, 2),
+            "load15": round(load15, 2),
+            "cores": os.cpu_count() or 0,
+        },
+        "memory": meminfo(),
+        "disk": disk_usage("/"),
+        "filesystems": filesystems(),
+        "network": network(),
+        "managedServices": managed_services(),
+        "discoveredNodes": discovered_nodes,
+        "blacklists": discover_blacklists(discovered_nodes),
+    })
+
+
+if __name__ == "__main__":
+    main()

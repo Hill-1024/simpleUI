@@ -11,19 +11,19 @@ const activeHookControllers = new Set();
 const activeHookRequests = new Set();
 
 const hookNames = [
-  "common.sh",
-  "hysteria2-deploy.sh",
-  "trojan-deploy.sh",
-  "server-status.sh",
-  "server-reboot.sh",
-  "status.sh",
-  "service.sh",
-  "exec.sh",
-  "agent-upgrade.sh",
-  "ban.sh",
-  "optimize.sh",
-  "ipquality.sh",
-  "uninstall.sh"
+  "common.py",
+  "hysteria2-deploy.py",
+  "trojan-deploy.py",
+  "server-status.py",
+  "server-reboot.py",
+  "status.py",
+  "service.py",
+  "exec.py",
+  "agent-upgrade.py",
+  "ban.py",
+  "optimize.py",
+  "ipquality.py",
+  "uninstall.py"
 ];
 
 function heredoc(path, content) {
@@ -60,19 +60,20 @@ CACHEABLE_ACTION_TTL = {
 RUN_CACHE = {}
 RUNNING = {}
 RUN_LOCK = threading.Lock()
+PYTHON_RUNNER = "import runpy,sys; sys.path.insert(0, sys.argv[1]); runpy.run_path(sys.argv[2], run_name='__main__')"
 ALLOWED = {
-    "deploy": {"hysteria2": "hysteria2-deploy.sh", "trojan": "trojan-deploy.sh"},
-    "server-status": "server-status.sh",
-    "server-reboot": "server-reboot.sh",
-    "status": "status.sh",
-    "service": "service.sh",
-    "exec": "exec.sh",
-    "upgrade-agent": "agent-upgrade.sh",
-    "ban": "ban.sh",
-    "optimize": "optimize.sh",
-    "ipquality": "ipquality.sh",
-    "node-delete": "uninstall.sh",
-    "uninstall": "uninstall.sh",
+    "deploy": {"hysteria2": "hysteria2-deploy.py", "trojan": "trojan-deploy.py"},
+    "server-status": "server-status.py",
+    "server-reboot": "server-reboot.py",
+    "status": "status.py",
+    "service": "service.py",
+    "exec": "exec.py",
+    "upgrade-agent": "agent-upgrade.py",
+    "ban": "ban.py",
+    "optimize": "optimize.py",
+    "ipquality": "ipquality.py",
+    "node-delete": "uninstall.py",
+    "uninstall": "uninstall.py",
 }
 
 
@@ -121,7 +122,9 @@ def run_hook(action, env, payload=None):
         raise ValueError("env must be an object")
     if payload is not None and not isinstance(payload, dict):
         raise ValueError("payload must be an object")
-    safe_env = os.environ.copy()
+    safe_env = {key: value for key, value in os.environ.items() if not key.startswith("PYTHON")}
+    safe_env["PYTHONNOUSERSITE"] = "1"
+    safe_env["PYTHONDONTWRITEBYTECODE"] = "1"
     for key, value in (env or {}).items():
         if isinstance(key, str) and key.startswith("SIMPLEUI_") and value is not None:
             safe_env[key] = str(value)
@@ -139,20 +142,20 @@ def run_hook(action, env, payload=None):
                 temp_paths.append(path)
 
         hook_name = selected_hook(action, safe_env)
-        with open(os.path.join(HOOK_DIR, "common.sh"), "r", encoding="utf-8") as handle:
-            common = handle.read()
-        with open(os.path.join(HOOK_DIR, hook_name), "r", encoding="utf-8") as handle:
-            script = handle.read()
-
-        proc = subprocess.run(
-            ["bash", "-se"],
-            input=common + "\n\n" + script + "\n",
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            env=safe_env,
-            timeout=3600 if action == "optimize" else (1800 if action in ("deploy", "ipquality") else 180),
-        )
+        hook_path = os.path.join(HOOK_DIR, hook_name)
+        timeout = 3600 if action == "optimize" else (1800 if action in ("deploy", "ipquality") else 180)
+        if hook_name.endswith(".py"):
+            proc = subprocess.run(
+                ["python3", "-I", "-B", "-c", PYTHON_RUNNER, HOOK_DIR, hook_path],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                env=safe_env,
+                cwd=HOOK_DIR,
+                timeout=timeout,
+            )
+        else:
+            raise ValueError("unsupported hook script type")
         return {"code": proc.returncode, "output": proc.stdout}
     finally:
         for path in temp_paths:
@@ -317,7 +320,8 @@ install -d -m 700 "$HOOK_ROOT" "$HOOK_DIR"
 ${heredoc("$HOOK_ROOT/agent.py", agent)}
 ${hookScripts.map((item) => heredoc(`$HOOK_DIR/${item.name}`, item.content)).join("")}
 chmod 700 "$HOOK_ROOT/agent.py"
-chmod 700 "$HOOK_DIR"/*.sh
+rm -f "$HOOK_DIR"/*.sh
+chmod 700 "$HOOK_DIR"/*.py
 
 if [ ! -s "$TLS_CERT" ] || [ ! -s "$TLS_KEY" ]; then
   openssl req -x509 -newkey rsa:2048 -sha256 -nodes \
