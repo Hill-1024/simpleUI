@@ -1,5 +1,7 @@
 node_modules
 dist
 data/state.json
+data/state.sqlite*
+data/archive/state-json-imported-*.json
 *.log
 .DS_Store
