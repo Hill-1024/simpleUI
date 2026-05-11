@@ -193,4 +193,4 @@ SimpleUI's deployment and diagnostics flow is informed by these projects and eco
 
 ## License
 
-This repository does not declare an open-source license yet. Please contact the maintainer before reuse, redistribution, or commercial use.
+The project source code is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). See [LICENSE](./LICENSE). Reuse, modification, redistribution, or offering this project as a network service must comply with AGPL-3.0; third-party services, remote node configuration, and user data are not automatically licensed by this repository.
