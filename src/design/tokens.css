@@ -1,0 +1,157 @@
+/* SimpleUI Design Tokens · Material 3 × Liquid Glass
+ * Light/Dark theme color, elevation, motion variables.
+ * Colors stored as raw "R G B" triplets so UnoCSS can apply alpha-value. */
+
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* ─── Primary (teal) ─── */
+  --md-primary: 0 107 95;
+  --md-on-primary: 255 255 255;
+  --md-primary-container: 159 242 226;
+  --md-on-primary-container: 0 32 28;
+
+  /* ─── Secondary (sage) ─── */
+  --md-secondary: 74 99 95;
+  --md-on-secondary: 255 255 255;
+  --md-secondary-container: 205 232 226;
+  --md-on-secondary-container: 6 32 28;
+
+  /* ─── Tertiary (cool slate) ─── */
+  --md-tertiary: 67 98 119;
+  --md-on-tertiary: 255 255 255;
+  --md-tertiary-container: 202 230 255;
+  --md-on-tertiary-container: 0 30 46;
+
+  /* ─── Error ─── */
+  --md-error: 186 26 26;
+  --md-on-error: 255 255 255;
+  --md-error-container: 255 218 214;
+  --md-on-error-container: 65 0 2;
+
+  /* ─── Warning ─── */
+  --md-warning: 138 90 0;
+  --md-on-warning: 255 255 255;
+  --md-warning-container: 255 222 170;
+  --md-on-warning-container: 44 23 0;
+
+  /* ─── Success ─── */
+  --md-success: 30 119 53;
+  --md-on-success: 255 255 255;
+  --md-success-container: 191 234 192;
+  --md-on-success-container: 0 33 5;
+
+  /* ─── Surfaces ─── */
+  --md-surface: 244 251 248;
+  --md-surface-dim: 213 219 216;
+  --md-surface-bright: 244 251 248;
+  --md-surface-container-lowest: 255 255 255;
+  --md-surface-container-low: 239 245 242;
+  --md-surface-container: 233 239 236;
+  --md-surface-container-high: 227 233 230;
+  --md-surface-container-highest: 222 228 225;
+
+  /* ─── Text & lines ─── */
+  --md-on-surface: 22 29 27;
+  --md-on-surface-variant: 63 73 69;
+  --md-outline: 111 121 118;
+  --md-outline-variant: 190 201 197;
+  --md-scrim: 0 0 0;
+  --md-shadow: 0 0 0;
+
+  /* ─── Glass alphas ─── */
+  --glass-alpha-panel: 0.72;
+  --glass-alpha-elevated: 0.84;
+  --glass-alpha-soft: 0.5;
+  --glass-alpha-rail: 0.66;
+  --glass-alpha-overlay: 0.55;
+
+  /* ─── Backdrop mesh (visible behind glass surfaces) ─── */
+  --backdrop-mesh:
+    radial-gradient(at 18% 12%, rgba(0, 107, 95, 0.22) 0px, transparent 48%),
+    radial-gradient(at 82% 22%, rgba(67, 98, 119, 0.18) 0px, transparent 50%),
+    radial-gradient(at 64% 88%, rgba(138, 90, 0, 0.12) 0px, transparent 55%),
+    radial-gradient(at 8% 76%, rgba(0, 137, 122, 0.18) 0px, transparent 55%);
+  --backdrop-base: rgb(232 244 240);
+
+  /* ─── Elevations ─── */
+  --md-shadow-elev-1: 0 1px 2px rgba(15, 23, 42, 0.05), 0 1px 3px rgba(15, 23, 42, 0.04);
+  --md-shadow-elev-2: 0 2px 6px rgba(15, 23, 42, 0.06), 0 4px 10px rgba(15, 23, 42, 0.05);
+  --md-shadow-elev-3: 0 6px 16px rgba(15, 23, 42, 0.08), 0 2px 6px rgba(15, 23, 42, 0.05);
+  --md-shadow-elev-4: 0 12px 28px rgba(15, 23, 42, 0.1), 0 4px 10px rgba(15, 23, 42, 0.05);
+  --md-shadow-elev-5: 0 24px 56px rgba(15, 23, 42, 0.14), 0 8px 18px rgba(15, 23, 42, 0.06);
+  --md-shadow-glass: 0 12px 36px rgba(15, 23, 42, 0.08), 0 2px 6px rgba(15, 23, 42, 0.04);
+  --md-shadow-glass-strong: 0 28px 72px rgba(15, 23, 42, 0.14), 0 4px 12px rgba(15, 23, 42, 0.06);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --md-primary: 110 219 198;
+  --md-on-primary: 0 55 49;
+  --md-primary-container: 0 80 72;
+  --md-on-primary-container: 159 242 226;
+
+  --md-secondary: 177 204 198;
+  --md-on-secondary: 28 53 49;
+  --md-secondary-container: 51 75 71;
+  --md-on-secondary-container: 205 232 226;
+
+  --md-tertiary: 171 202 226;
+  --md-on-tertiary: 18 51 70;
+  --md-tertiary-container: 43 73 94;
+  --md-on-tertiary-container: 202 230 255;
+
+  --md-error: 255 180 171;
+  --md-on-error: 105 0 5;
+  --md-error-container: 147 0 10;
+  --md-on-error-container: 255 218 214;
+
+  --md-warning: 255 185 96;
+  --md-on-warning: 70 44 0;
+  --md-warning-container: 105 66 0;
+  --md-on-warning-container: 255 222 170;
+
+  --md-success: 165 214 167;
+  --md-on-success: 0 57 12;
+  --md-success-container: 27 94 32;
+  --md-on-success-container: 191 234 192;
+
+  --md-surface: 14 21 19;
+  --md-surface-dim: 14 21 19;
+  --md-surface-bright: 52 58 56;
+  --md-surface-container-lowest: 9 15 14;
+  --md-surface-container-low: 22 29 27;
+  --md-surface-container: 26 33 31;
+  --md-surface-container-high: 37 43 41;
+  --md-surface-container-highest: 48 54 52;
+
+  --md-on-surface: 222 228 225;
+  --md-on-surface-variant: 190 201 197;
+  --md-outline: 136 147 144;
+  --md-outline-variant: 63 73 69;
+  --md-scrim: 0 0 0;
+  --md-shadow: 0 0 0;
+
+  --glass-alpha-panel: 0.55;
+  --glass-alpha-elevated: 0.7;
+  --glass-alpha-soft: 0.4;
+  --glass-alpha-rail: 0.5;
+  --glass-alpha-overlay: 0.6;
+
+  --backdrop-mesh:
+    radial-gradient(at 18% 12%, rgba(0, 137, 122, 0.32) 0px, transparent 48%),
+    radial-gradient(at 82% 22%, rgba(67, 98, 119, 0.28) 0px, transparent 50%),
+    radial-gradient(at 64% 88%, rgba(184, 119, 0, 0.18) 0px, transparent 55%),
+    radial-gradient(at 8% 76%, rgba(0, 175, 154, 0.22) 0px, transparent 55%);
+  --backdrop-base: rgb(8 14 12);
+
+  --md-shadow-elev-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.32);
+  --md-shadow-elev-2: 0 2px 6px rgba(0, 0, 0, 0.4), 0 4px 10px rgba(0, 0, 0, 0.32);
+  --md-shadow-elev-3: 0 6px 16px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.32);
+  --md-shadow-elev-4: 0 12px 28px rgba(0, 0, 0, 0.5), 0 4px 10px rgba(0, 0, 0, 0.34);
+  --md-shadow-elev-5: 0 24px 56px rgba(0, 0, 0, 0.6), 0 8px 18px rgba(0, 0, 0, 0.4);
+  --md-shadow-glass: 0 12px 36px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.35);
+  --md-shadow-glass-strong: 0 28px 72px rgba(0, 0, 0, 0.6), 0 4px 12px rgba(0, 0, 0, 0.4);
+}

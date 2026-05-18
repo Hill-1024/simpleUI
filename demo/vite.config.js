@@ -2,6 +2,7 @@ import path from "node:path";
 import { readFileSync } from "node:fs";
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
+import UnoCSS from "unocss/vite";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const demoRoot = path.join(repoRoot, "demo");
@@ -28,7 +29,7 @@ export default defineConfig({
   root: demoRoot,
   base: "./",
   publicDir: path.join(demoRoot, "public"),
-  plugins: [demoApiRedirect(), vue()],
+  plugins: [demoApiRedirect(), UnoCSS(), vue()],
   define: {
     __APP_VERSION__: JSON.stringify(packageJson.version),
     __APP_AUTHOR__: JSON.stringify(packageJson.author || "Hill-1024"),
