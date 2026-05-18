@@ -5,6 +5,10 @@ import { fileURLToPath } from "node:url";
 
 const hookPath = fileURLToPath(new URL("./hysteria2-deploy.py", import.meta.url));
 
+function isRunEventForScript(event, scriptName) {
+  return event[0] === "run" && event[1] === "bash" && event[2]?.split(/[\\/]/).at(-1) === scriptName;
+}
+
 function runPythonSnippet(source) {
   const result = spawnSync("python3", ["-", hookPath], {
     input: source,
@@ -120,7 +124,7 @@ print(json.dumps({"installed_core": installed_core, "events": events}))
   assert.equal(result.installed_core, "0");
   assert.ok(result.events.some((event) => event[0] === "log" && event[1].includes("service files are missing")));
   assert.ok(result.events.some((event) => event[0] === "download" && event[1] === "https://get.hy2.sh/"));
-  assert.ok(result.events.some((event) => event[0] === "run" && event[1] === "bash" && event[2].endsWith("/get-hy2.sh")));
+  assert.ok(result.events.some((event) => isRunEventForScript(event, "get-hy2.sh")));
 });
 
 test("Hysteria2 installer skips official core installer only when binary and services exist", () => {
