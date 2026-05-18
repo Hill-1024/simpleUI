@@ -2,11 +2,21 @@ import { EventEmitter } from "node:events";
 import { isIP } from "node:net";
 import { v4 as uuid } from "uuid";
 import { appendAudit, mutateDb, stamp } from "./db.js";
-import { buildHookUpgradeBundleB64, callHookAgent, checkHookHealth, installHookAgent, isHookFingerprintMismatch } from "./hook-agent.js";
+import { buildHookUpgradeBundleB64, callHookAgent, checkHookHealth, installHookAgent, isHookFingerprintMismatch, isHookTlsHandshakeFailure } from "./hook-agent.js";
 import { isDeployableProtocol, monitorProtocols, providers } from "./providers.js";
 import { collectNodeSecrets, sanitizeNodeSecrets } from "./security.js";
 
 const SERVER_SYNC_FAILURE_THRESHOLD = 3;
+const SIMPLEUI_DEPLOYMENT_TARGETS = {
+  hysteria2: {
+    service: "hysteria-server.service",
+    configPath: "/etc/hysteria/config.yaml"
+  },
+  trojan: {
+    service: "trojan.service",
+    configPath: "/usr/src/trojan/server.conf"
+  }
+};
 const streams = new Map();
 
 function getStream(jobId) {
@@ -116,7 +126,8 @@ function serverEnv({ action, extra = {} }) {
 }
 
 function isTransientHookError(error) {
-  return /timed out|timeout|socket hang up|ECONNRESET|ECONNREFUSED|EHOSTUNREACH|ENETUNREACH|ETIMEDOUT|fetch failed/i
+  return isHookTlsHandshakeFailure(error) ||
+    /timed out|timeout|socket hang up|ECONNRESET|ECONNREFUSED|EHOSTUNREACH|ENETUNREACH|ETIMEDOUT|fetch failed/i
     .test(error.message || "");
 }
 
@@ -346,6 +357,21 @@ function shouldFallbackHookUpgrade(error) {
   return /Missing hook upgrade bundle|request body too large|Argument list too long|unsupported action|invalid hook script name/i.test(message);
 }
 
+async function runDirectHookUpgrade({ server, bundle, timeoutMs = 120_000 }) {
+  const result = await callHookAgent({
+    server,
+    action: "upgrade-agent",
+    env: serverEnv({ action: "upgrade-agent" }),
+    payload: { bundleB64: bundle },
+    timeoutMs
+  });
+  const directParsed = parseMarker(result.output || "", "__SIMPLEUI_RESULT__");
+  if (directParsed?.ok === false) {
+    throw new Error(directParsed.error || "Hook agent rejected upgrade bundle");
+  }
+  return result;
+}
+
 async function upgradeHookViaChunkedExec({ server, bundle, jobId, secrets }) {
   const remotePath = `/tmp/simpleui-upgrade-${uuid()}.b64`;
   const chunkSize = 48 * 1024;
@@ -444,6 +470,112 @@ function optionalNumber(value) {
   return Number.isFinite(number) && number > 0 ? number : undefined;
 }
 
+function legacyHttpHookServer(server = {}) {
+  let hookUrl = "";
+  try {
+    const parsed = new URL(server.hookUrl);
+    parsed.protocol = "http:";
+    parsed.pathname = "";
+    parsed.search = "";
+    parsed.hash = "";
+    hookUrl = parsed.toString().replace(/\/$/, "");
+  } catch {
+    hookUrl = `http://${formatEndpointHost(server.host)}:${Number(server.hookPort || 37877)}`;
+  }
+  return {
+    ...server,
+    hookUrl,
+    hookCertFingerprint: "",
+    hookTlsError: ""
+  };
+}
+
+function deploymentListenPort(node = {}) {
+  return optionalNumber(node.listenPort ?? node.port) || 443;
+}
+
+function simpleUiDeploymentIdentity(node = {}) {
+  const target = SIMPLEUI_DEPLOYMENT_TARGETS[node.protocol] || {};
+  const listenPort = deploymentListenPort(node);
+  const configPath = cleanText(node.configPath) || target.configPath || "";
+  const service = cleanText(node.service) || target.service || "";
+  return {
+    service,
+    configPath,
+    listenPort,
+    remoteKey: cleanText(node.remoteKey) || (configPath ? `${node.protocol}:${configPath}:${listenPort}` : "")
+  };
+}
+
+function withSimpleUiDeploymentIdentity(node = {}) {
+  if (!isDeployableProtocol(node.protocol)) return node;
+  const identity = simpleUiDeploymentIdentity(node);
+  return {
+    ...node,
+    ...identity,
+    managedBy: "simpleui",
+    monitorOnly: false
+  };
+}
+
+function isSimpleUiDeploymentNode(node = {}) {
+  return Boolean(
+    node?.serverId &&
+    isDeployableProtocol(node.protocol) &&
+    node.managedBy !== "manual" &&
+    node.managedBy !== "sing-box"
+  );
+}
+
+function sameSimpleUiDeploymentSlot(node = {}, target = {}) {
+  if (!isSimpleUiDeploymentNode(node) || !isSimpleUiDeploymentNode(target)) return false;
+  if (node.serverId !== target.serverId || node.protocol !== target.protocol) return false;
+  const nodeIdentity = simpleUiDeploymentIdentity(node);
+  const targetIdentity = simpleUiDeploymentIdentity(target);
+  if (nodeIdentity.remoteKey && targetIdentity.remoteKey && nodeIdentity.remoteKey === targetIdentity.remoteKey) return true;
+  if (nodeIdentity.configPath && targetIdentity.configPath && nodeIdentity.configPath === targetIdentity.configPath) return true;
+  return Number(nodeIdentity.listenPort) === Number(targetIdentity.listenPort);
+}
+
+function findSimpleUiDeploymentNode(nodes = [], target = {}) {
+  return nodes.find((node) => sameSimpleUiDeploymentSlot(node, target));
+}
+
+function replaceNodeReferenceIds(state, duplicateIds, canonicalId) {
+  for (const user of state.users || []) {
+    const nodeIds = new Set();
+    for (const id of user.nodeIds || []) {
+      nodeIds.add(duplicateIds.has(id) ? canonicalId : id);
+    }
+    user.nodeIds = Array.from(nodeIds);
+    user.updatedAt = new Date().toISOString();
+  }
+  for (const ban of state.bans || []) {
+    if (duplicateIds.has(ban.nodeId)) ban.nodeId = canonicalId;
+    if (Array.isArray(ban.nodeIds)) {
+      ban.nodeIds = Array.from(new Set(ban.nodeIds.map((id) => duplicateIds.has(id) ? canonicalId : id)));
+    }
+    ban.updatedAt = new Date().toISOString();
+  }
+  for (const collection of [state.connections || [], state.remoteTraffic || []]) {
+    for (const entry of collection) {
+      if (duplicateIds.has(entry.nodeId)) entry.nodeId = canonicalId;
+    }
+  }
+}
+
+function dedupeSimpleUiDeploymentSlot(state, canonicalNode) {
+  const duplicateIds = new Set(
+    (state.nodes || [])
+      .filter((node) => node.id !== canonicalNode.id && sameSimpleUiDeploymentSlot(node, canonicalNode))
+      .map((node) => node.id)
+  );
+  if (!duplicateIds.size) return 0;
+  replaceNodeReferenceIds(state, duplicateIds, canonicalNode.id);
+  state.nodes = (state.nodes || []).filter((node) => !duplicateIds.has(node.id));
+  return duplicateIds.size;
+}
+
 function discoveryEndpoint(server, discovered, listenPort) {
   const explicit = cleanText(discovered.endpoint);
   if (explicit) return explicit;
@@ -485,7 +617,16 @@ export function mergeDiscoveredNodes(state, server, discoveredNodes = [], { time
     if (!monitorProtocols[discovered?.protocol]) continue;
     const listenPort = optionalNumber(discovered.listenPort ?? discovered.port) || 443;
     const remoteKey = discoveredRemoteKey(discovered, listenPort);
-    const existing = findExistingDiscoveredNode(state.nodes, server.id, discovered, listenPort, remoteKey);
+    const discoveredTarget = withSimpleUiDeploymentIdentity({
+      protocol: discovered.protocol,
+      serverId: server.id,
+      listenPort,
+      service: cleanText(discovered.service),
+      configPath: cleanText(discovered.configPath),
+      remoteKey
+    });
+    const existing = findExistingDiscoveredNode(state.nodes, server.id, discovered, listenPort, remoteKey)
+      || findSimpleUiDeploymentNode(state.nodes, discoveredTarget);
     const provider = providers[discovered.protocol] || monitorProtocols[discovered.protocol];
     const isNew = !existing;
     const discoveredName = cleanText(discovered.name) || provider?.name || discovered.protocol;
@@ -535,9 +676,11 @@ export function mergeDiscoveredNodes(state, server, discoveredNodes = [], { time
 
     if (existing) {
       Object.assign(existing, nextNode);
+      dedupeSimpleUiDeploymentSlot(state, existing);
       summary.updated += 1;
     } else {
       state.nodes.push(nextNode);
+      dedupeSimpleUiDeploymentSlot(state, nextNode);
       summary.imported += 1;
     }
 
@@ -850,14 +993,16 @@ export async function markServerSyncFailed(server, error, { keepOnline = false }
     const savedServer = state.servers.find((item) => item.id === server.id);
     if (!savedServer) return;
     const fingerprintMismatch = isHookFingerprintMismatch(error);
+    const tlsHandshakeFailure = isHookTlsHandshakeFailure(error);
     const legacyTransport = /legacy HTTP transport/i.test(error.message || "");
     const authFailure = isHookAuthFailure(error);
     const previousFailureCount = Number(savedServer.metrics?.syncFailureCount || 0);
-    const syncFailureCount = (fingerprintMismatch || authFailure || keepOnline || legacyTransport)
+    const syncFailureCount = (fingerprintMismatch || tlsHandshakeFailure || authFailure || keepOnline || legacyTransport)
       ? previousFailureCount
       : previousFailureCount + 1;
-    const keepHookReady = (keepOnline || legacyTransport) ||
+    const keepHookReady = (keepOnline || legacyTransport || tlsHandshakeFailure) ||
       (!fingerprintMismatch &&
+        !tlsHandshakeFailure &&
         !authFailure &&
         syncFailureCount < SERVER_SYNC_FAILURE_THRESHOLD &&
         ["online", "warning", "rebooting"].includes(savedServer.hookStatus || savedServer.status));
@@ -866,12 +1011,16 @@ export async function markServerSyncFailed(server, error, { keepOnline = false }
     savedServer.hookStatus = keepHookReady
       ? "online"
       : (savedServer.hookStatus === "deleting" ? savedServer.hookStatus : "unreachable");
-    savedServer.hookTlsError = fingerprintMismatch ? "fingerprint-mismatch" : "";
+    savedServer.hookTlsError = fingerprintMismatch
+      ? "fingerprint-mismatch"
+      : (tlsHandshakeFailure ? "tls-handshake-failed" : "");
     savedServer.metrics = {
       ...(savedServer.metrics || {}),
       lastSyncError: fingerprintMismatch
         ? "Hook TLS certificate fingerprint mismatch. Trust the current certificate or reinstall the hook."
-        : error.message,
+        : (tlsHandshakeFailure
+            ? "Hook TLS handshake failed before certificate exchange. The remote port may still be running a legacy HTTP hook; run online hook upgrade or reinstall the hook over SSH."
+            : error.message),
       syncFailureCount,
       updatedAt: timestamp
     };
@@ -959,25 +1108,47 @@ export function removeServerState(state, serverId) {
     .filter((ban) => !ban.nodeIds || ban.nodeIds.length);
 }
 
-export function removeNodeState(state, nodeId) {
-  state.nodes = (state.nodes || []).filter((item) => item.id !== nodeId);
-  state.connections = (state.connections || []).filter((item) => item.nodeId !== nodeId);
-  state.remoteTraffic = (state.remoteTraffic || []).filter((item) => item.nodeId !== nodeId);
+function removeNodeIdsState(state, nodeIds) {
+  const removedNodeIds = nodeIds instanceof Set ? nodeIds : new Set(nodeIds);
+  if (!removedNodeIds.size) return;
+  state.nodes = (state.nodes || []).filter((item) => !removedNodeIds.has(item.id));
+  state.connections = (state.connections || []).filter((item) => !removedNodeIds.has(item.nodeId));
+  state.remoteTraffic = (state.remoteTraffic || []).filter((item) => !removedNodeIds.has(item.nodeId));
   state.users = (state.users || [])
     .map((user) => ({
       ...user,
-      nodeIds: (user.nodeIds || []).filter((id) => id !== nodeId),
+      nodeIds: (user.nodeIds || []).filter((id) => !removedNodeIds.has(id)),
       updatedAt: new Date().toISOString()
     }))
     .filter((user) => (user.nodeIds || []).length);
   state.bans = (state.bans || [])
-    .filter((ban) => ban.nodeId !== nodeId)
+    .filter((ban) => !removedNodeIds.has(ban.nodeId))
     .map((ban) => ({
       ...ban,
-      nodeIds: (ban.nodeIds || []).filter((id) => id !== nodeId),
+      nodeIds: (ban.nodeIds || []).filter((id) => !removedNodeIds.has(id)),
       updatedAt: new Date().toISOString()
     }))
     .filter((ban) => !ban.nodeIds || ban.nodeIds.length);
+}
+
+export function removeNodeState(state, nodeId) {
+  removeNodeIdsState(state, new Set([nodeId]));
+}
+
+export function removeSimpleUiDeploymentSlotState(state, node) {
+  const target = withSimpleUiDeploymentIdentity(node);
+  if (!isSimpleUiDeploymentNode(target)) {
+    removeNodeState(state, node.id);
+    return 1;
+  }
+  const ids = new Set(
+    (state.nodes || [])
+      .filter((item) => sameSimpleUiDeploymentSlot(item, target))
+      .map((item) => item.id)
+  );
+  if (!ids.size && node.id) ids.add(node.id);
+  removeNodeIdsState(state, ids);
+  return ids.size;
 }
 
 export async function createJob({ type, title, payload }) {
@@ -1128,21 +1299,17 @@ export async function runHookUpgradeJob(job, { server }) {
     const bundle = await buildHookUpgradeBundleB64();
     let result;
     try {
-      result = await callHookAgent({
-        server,
-        action: "upgrade-agent",
-        env: serverEnv({ action: "upgrade-agent" }),
-        payload: { bundleB64: bundle },
-        timeoutMs: 120_000
-      });
-      const directParsed = parseMarker(result.output || "", "__SIMPLEUI_RESULT__");
-      if (directParsed?.ok === false) {
-        throw new Error(directParsed.error || "Hook agent rejected upgrade bundle");
-      }
+      result = await runDirectHookUpgrade({ server, bundle });
     } catch (error) {
-      if (!shouldFallbackHookUpgrade(error)) throw error;
-      await logJob(job.id, `Direct hook upgrade transport failed: ${redact(error.message, secrets)}\n`, secrets);
-      result = await upgradeHookViaChunkedExec({ server, bundle, jobId: job.id, secrets });
+      if (isHookTlsHandshakeFailure(error) && String(server.hookUrl || "").startsWith("https://")) {
+        await logJob(job.id, `Hook TLS handshake failed; retrying upgrade through legacy HTTP transport.\n`, secrets);
+        result = await runDirectHookUpgrade({ server: legacyHttpHookServer(server), bundle });
+      } else if (shouldFallbackHookUpgrade(error)) {
+        await logJob(job.id, `Direct hook upgrade transport failed: ${redact(error.message, secrets)}\n`, secrets);
+        result = await upgradeHookViaChunkedExec({ server, bundle, jobId: job.id, secrets });
+      } else {
+        throw error;
+      }
     }
     await logJob(job.id, stripMarker(result.output || "", ["__SIMPLEUI_RESULT__"]), secrets);
     const parsed = parseMarker(result.output || "", "__SIMPLEUI_RESULT__") || { ok: true };
@@ -1211,37 +1378,47 @@ export async function runDeployJob(job, { server, node, users }) {
     if (result?.jumpPortEnd) node.jumpPortEnd = Number(result.jumpPortEnd);
     const endpointHost = result?.connectHost || result?.domain || node.domain || server.host;
     const endpoint = `${formatEndpointHost(endpointHost)}:${node.listenPort || 443}`;
+    const deploymentNode = withSimpleUiDeploymentIdentity({
+      ...node,
+      serverId: server.id,
+      serviceProtocol: monitorProtocols[node.protocol]?.serviceProtocol || node.serviceProtocol || (node.protocol === "trojan" ? "tcp" : "udp")
+    });
+    let deploymentNodeId = deploymentNode.id;
+    let mergedDuplicateCount = 0;
 
     await mutateDb((state) => {
       const savedServer = state.servers.find((item) => item.id === server.id);
       if (savedServer) Object.assign(savedServer, stamp({ ...server, status: "online" }));
       else state.servers.push(stamp({ ...server, status: "online" }, true));
 
-      const savedNode = state.nodes.find((item) => item.id === node.id);
+      const savedNodeById = state.nodes.find((item) => item.id === node.id);
+      const savedNode = savedNodeById || findSimpleUiDeploymentNode(state.nodes, deploymentNode);
+      deploymentNodeId = savedNode?.id || deploymentNode.id;
       const nextNode = stamp(sanitizeNodeSecrets({
         ...(savedNode || {}),
-        ...node,
+        ...deploymentNode,
+        id: deploymentNodeId,
         serverId: server.id,
         managedBy: "simpleui",
         monitorOnly: false,
-        serviceProtocol: monitorProtocols[node.protocol]?.serviceProtocol || node.serviceProtocol || (node.protocol === "trojan" ? "tcp" : "udp"),
         status: "online",
         endpoint,
         capability: providers[node.protocol]?.capabilities || []
       }), !savedNode);
       if (savedNode) Object.assign(savedNode, nextNode);
       else state.nodes.push(nextNode);
+      mergedDuplicateCount = dedupeSimpleUiDeploymentSlot(state, nextNode);
 
       for (const user of users || []) {
         const existing = state.users.find((item) => item.username === user.username);
         if (existing) {
-          existing.nodeIds = Array.from(new Set([...(existing.nodeIds || []), node.id]));
+          existing.nodeIds = Array.from(new Set([...(existing.nodeIds || []), deploymentNodeId]));
           existing.status = "active";
           existing.updatedAt = new Date().toISOString();
         } else {
           state.users.push(stamp({
             username: user.username,
-            nodeIds: [node.id],
+            nodeIds: [deploymentNodeId],
             status: "active",
             tx: 0,
             rx: 0,
@@ -1256,9 +1433,12 @@ export async function runDeployJob(job, { server, node, users }) {
         { jobId: job.id }
       );
     });
+    if (mergedDuplicateCount) {
+      await logJob(job.id, `Merged ${mergedDuplicateCount} duplicate local node record(s) for this remote deployment.\n`, secrets);
+    }
     const deploymentResult = {
       ok: true,
-      nodeId: node.id,
+      nodeId: deploymentNodeId,
       nodeName: node.name,
       protocol: node.protocol,
       serverName: server.name,
@@ -1346,7 +1526,7 @@ export async function runDeleteNodeJob(job, { server, node }) {
     const parsed = parseMarker(result.output, "__SIMPLEUI_RESULT__") || { ok: true };
 
     await mutateDb((state) => {
-      removeNodeState(state, node.id);
+      const removedCount = removeSimpleUiDeploymentSlotState(state, node);
       const savedServer = state.servers.find((item) => item.id === server.id);
       if (savedServer) {
         savedServer.status = "online";
@@ -1356,6 +1536,7 @@ export async function runDeleteNodeJob(job, { server, node }) {
       appendAudit(state, "node.delete.complete", `${node.name} deleted from ${server.name}`, {
         serverId: server.id,
         nodeId: node.id,
+        removedLocalRecords: removedCount,
         jobId: job.id
       });
     });

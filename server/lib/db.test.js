@@ -126,3 +126,28 @@ test("public state filters server hook tokens", async () => {
     assert.equal(publicView.servers[0].hookSecurity.mismatch, true);
   });
 });
+
+test("public state marks TLS handshake failures as upgradeable hook state", async () => {
+  await withTempDb(async ({ db }) => {
+    const publicView = db.publicState({
+      servers: [{
+        id: "srv-1",
+        hookUrl: "https://example.test:37877",
+        hookStatus: "online",
+        hookToken: "secret",
+        hookCertFingerprint: "abc",
+        hookTlsError: "tls-handshake-failed"
+      }],
+      nodes: [],
+      users: [],
+      connections: [],
+      remoteTraffic: [],
+      bans: [],
+      jobs: [],
+      audit: []
+    });
+    assert.equal(publicView.servers[0].hookSecurity.legacy, true);
+    assert.equal(publicView.servers[0].hookSecurity.upgradeRequired, true);
+    assert.equal(publicView.servers[0].hookSecurity.mismatch, false);
+  });
+});

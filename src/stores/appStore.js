@@ -1541,7 +1541,7 @@ async function installServer() {
 }
 
 async function upgradeHook(server) {
-  if (!window.confirm(`通过现有 hook 在线升级 ${server.name}？如果目标服务器运行的是旧版 hook，可能需要先用 SSH 重装一次来获得在线升级能力。`)) return;
+  if (!window.confirm(`通过现有 hook 在线升级 ${server.name}？如果只是 TLS/旧版 HTTP 协议不匹配，面板会尝试自动修复；如果 hook 完全离线，则仍需要通过 SSH 重装。`)) return;
   busy.value = true;
   try {
     const result = await api.upgradeHook(server.id);

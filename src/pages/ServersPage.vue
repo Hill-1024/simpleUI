@@ -86,7 +86,7 @@
                         <button type="button" title="取消编辑" :disabled="busy" @click="cancelEditServer"><X :size="15" /></button>
                       </template>
                       <template v-else>
-                        <button type="button" title="在线升级 hook" :disabled="busy || (row.server.hookStatus !== 'online' && !row.server.hookSecurity?.legacy)" @click="upgradeHook(row.server)"><ShieldCheck :size="15" /></button>
+                        <button type="button" title="在线升级 hook" :disabled="busy || !row.server.hookUrl || row.server.hookStatus === 'deleting'" @click="upgradeHook(row.server)"><ShieldCheck :size="15" /></button>
                         <button type="button" title="信任当前 Hook TLS 证书" :disabled="busy || !row.server.hookSecurity?.mismatch" @click="trustHookCertificate(row.server)"><SearchCheck :size="15" /></button>
                         <button type="button" title="通过 SSH 重装 hook" :disabled="busy" @click="prepareHookUpgrade(row.server)"><RefreshCcw :size="15" /></button>
                         <button type="button" title="编辑服务器信息" :disabled="busy" @click="startEditServer(row.server)"><Pencil :size="15" /></button>

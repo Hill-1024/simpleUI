@@ -411,6 +411,13 @@ export function isHookFingerprintMismatch(error) {
   return error?.code === "HOOK_TLS_FINGERPRINT_MISMATCH";
 }
 
+export function isHookTlsHandshakeFailure(error) {
+  const message = String(error?.message || "");
+  const code = String(error?.code || "");
+  return /secure TLS connection was established|ssl3_get_record|wrong version number|ERR_SSL|EPROTO/i.test(message) ||
+    /ERR_SSL|EPROTO/i.test(code);
+}
+
 export function isLegacyHookTransport(server = {}) {
   if (!server.hookUrl) return false;
   try {

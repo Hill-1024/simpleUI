@@ -283,6 +283,8 @@ export function publicServer(server) {
   const pinned = Boolean(hookCertFingerprint);
   const mismatch = server.hookTlsError === "fingerprint-mismatch" ||
     /fingerprint mismatch/i.test(server.metrics?.lastSyncError || "");
+  const tlsHandshakeFailed = server.hookTlsError === "tls-handshake-failed" ||
+    /TLS handshake failed|secure TLS connection/i.test(server.metrics?.lastSyncError || "");
   return {
     ...safe,
     hookInstalled: Boolean(server.hookUrl && server.hookStatus === "online"),
@@ -290,8 +292,8 @@ export function publicServer(server) {
       transport: !hasHook ? "none" : (isHttps ? "https" : "http"),
       pinned,
       mismatch,
-      legacy: hasHook && (!isHttps || !pinned),
-      upgradeRequired: hasHook && (!isHttps || !pinned || mismatch)
+      legacy: hasHook && (!isHttps || !pinned || tlsHandshakeFailed),
+      upgradeRequired: hasHook && (!isHttps || !pinned || mismatch || tlsHandshakeFailed)
     }
   };
 }

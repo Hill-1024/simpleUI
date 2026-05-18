@@ -9,6 +9,40 @@ import common
 
 
 WORKDIR = pathlib.Path("/opt/simpleui/upstream/hysteria2")
+HYSTERIA_SERVICE = "hysteria-server.service"
+HYSTERIA_TEMPLATE_SERVICE = "hysteria-server@.service"
+
+
+def installer_env():
+    env = os.environ.copy()
+    if not env.get("DEBIAN_FRONTEND"):
+        env["DEBIAN_FRONTEND"] = "noninteractive"
+    if not env.get("TERM"):
+        env["TERM"] = "xterm"
+    return env
+
+
+def hysteria_binary_exists():
+    return common.command_exists("hysteria") or os.access("/usr/local/bin/hysteria", os.X_OK)
+
+
+def systemd_unit_exists(name):
+    for directory in ["/etc/systemd/system", "/lib/systemd/system", "/usr/lib/systemd/system"]:
+        if os.path.exists(os.path.join(directory, name)):
+            return True
+    return common.run(["systemctl", "cat", name], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+
+
+def hysteria_service_units_exist():
+    return systemd_unit_exists(HYSTERIA_SERVICE) and systemd_unit_exists(HYSTERIA_TEMPLATE_SERVICE)
+
+
+def run_official_hysteria_installer(reason):
+    common.log(reason)
+    installer = WORKDIR / "get-hy2.sh"
+    common.download("https://get.hy2.sh/", str(installer))
+    common.chmod(installer, 0o700)
+    common.run(["bash", str(installer)], env=installer_env())
 
 
 def install_upstream_flow():
@@ -25,18 +59,24 @@ def install_upstream_flow():
     common.chmod(WORKDIR / "hysteria2.py", 0o700)
 
     common.log("Installing Python-flow dependencies from phy2.sh")
-    common.run(["bash", "./phy2.sh"], cwd=WORKDIR)
+    common.run(["bash", "./phy2.sh"], cwd=WORKDIR, env=installer_env())
 
     installed_core = "0"
-    if not common.command_exists("hysteria") and not os.access("/usr/local/bin/hysteria", os.X_OK):
-        common.log("Installing Hysteria2 core using the same official installer invoked by hysteria2.py")
+    binary_present = hysteria_binary_exists()
+    services_present = hysteria_service_units_exist()
+    if not binary_present:
         installed_core = "1"
-        installer = WORKDIR / "get-hy2.sh"
-        common.download("https://get.hy2.sh/", str(installer))
-        common.chmod(installer, 0o700)
-        common.run(["bash", str(installer)])
+        run_official_hysteria_installer("Installing Hysteria2 core using the same official installer invoked by hysteria2.py")
+    elif not services_present:
+        run_official_hysteria_installer("Hysteria2 binary is present but systemd service files are missing; repairing official service files")
     else:
         common.log("Hysteria2 core already present")
+    if not hysteria_binary_exists():
+        common.log("Hysteria2 executable is missing after installation")
+        raise SystemExit(34)
+    if not hysteria_service_units_exist():
+        common.log("Hysteria2 systemd service files are missing after installation")
+        raise SystemExit(34)
     return installed_core
 
 
@@ -109,7 +149,7 @@ def add_iptables_rule(binary, iface, start_port, end_port, target_port):
     if common.run(check_args, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
         return
     add_args = check_args[:]
-    add_args[4] = "-A"
+    add_args[3] = "-A"
     common.run(add_args)
 
 

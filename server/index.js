@@ -632,8 +632,20 @@ app.post("/api/servers/:id/reboot", async (req, res) => {
 });
 
 app.post("/api/servers/:id/hook/upgrade", async (req, res) => {
-  const server = await requireReadyServer(req.params.id, res);
-  if (!server) return;
+  const state = await loadDb();
+  const server = state.servers.find((item) => item.id === req.params.id);
+  if (!server) {
+    res.status(404).json({ error: "Server not found" });
+    return;
+  }
+  if (!server.hookUrl || !server.hookToken) {
+    res.status(409).json({ error: "Server hook is not installed" });
+    return;
+  }
+  if (server.hookStatus === "deleting") {
+    res.status(409).json({ error: "Server hook is being deleted" });
+    return;
+  }
   const job = await createJob({
     type: "hook-upgrade",
     title: `Upgrade hook on ${server.name}`,

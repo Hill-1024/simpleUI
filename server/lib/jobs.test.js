@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mergeDiscoveredNodes, syncBlacklistRecords } from "./jobs.js";
+import { mergeDiscoveredNodes, removeSimpleUiDeploymentSlotState, syncBlacklistRecords } from "./jobs.js";
 
 test("mergeDiscoveredNodes imports remote managed node and usernames without secrets", () => {
   const state = { nodes: [], users: [], audit: [] };
@@ -51,6 +51,94 @@ test("mergeDiscoveredNodes refreshes an existing remote node instead of duplicat
   assert.equal(state.nodes[0].id, firstNodeId);
   assert.equal(state.nodes[0].status, "warning");
   assert.deepEqual(state.users[0].nodeIds, [firstNodeId]);
+});
+
+test("mergeDiscoveredNodes collapses duplicate SimpleUI deployment records for the same remote slot", () => {
+  const state = {
+    nodes: [{
+      id: "node-local",
+      serverId: "srv-1",
+      protocol: "hysteria2",
+      listenPort: 443,
+      managedBy: "simpleui",
+      monitorOnly: false
+    }, {
+      id: "node-remote",
+      serverId: "srv-1",
+      protocol: "hysteria2",
+      remoteKey: "hysteria2:/etc/hysteria/config.yaml:443",
+      configPath: "/etc/hysteria/config.yaml",
+      listenPort: 443,
+      managedBy: "simpleui",
+      monitorOnly: false
+    }],
+    users: [{ username: "alice", nodeIds: ["node-local"] }],
+    bans: [{ id: "ban-1", nodeId: "node-local", target: "203.0.113.8" }],
+    connections: [{ id: "conn-1", nodeId: "node-local" }],
+    remoteTraffic: [{ id: "traffic-1", nodeId: "node-local" }],
+    audit: []
+  };
+  const server = { id: "srv-1", name: "HK", host: "203.0.113.10" };
+
+  const summary = mergeDiscoveredNodes(state, server, [{
+    protocol: "hysteria2",
+    remoteKey: "hysteria2:/etc/hysteria/config.yaml:443",
+    configPath: "/etc/hysteria/config.yaml",
+    listenPort: 443,
+    active: "active",
+    managedBy: "simpleui",
+    users: ["alice"]
+  }], { timestamp: "2026-05-09T00:01:00.000Z" });
+
+  assert.equal(summary.updated, 1);
+  assert.equal(state.nodes.length, 1);
+  assert.equal(state.nodes[0].id, "node-remote");
+  assert.deepEqual(state.users[0].nodeIds, ["node-remote"]);
+  assert.equal(state.bans[0].nodeId, "node-remote");
+  assert.equal(state.connections[0].nodeId, "node-remote");
+  assert.equal(state.remoteTraffic[0].nodeId, "node-remote");
+});
+
+test("removeSimpleUiDeploymentSlotState removes duplicate local records for one remote deployment", () => {
+  const state = {
+    nodes: [{
+      id: "node-a",
+      serverId: "srv-1",
+      protocol: "hysteria2",
+      remoteKey: "hysteria2:/etc/hysteria/config.yaml:443",
+      configPath: "/etc/hysteria/config.yaml",
+      listenPort: 443,
+      managedBy: "simpleui",
+      monitorOnly: false
+    }, {
+      id: "node-b",
+      serverId: "srv-1",
+      protocol: "hysteria2",
+      listenPort: 443,
+      managedBy: "simpleui",
+      monitorOnly: false
+    }, {
+      id: "node-other",
+      serverId: "srv-1",
+      protocol: "trojan",
+      listenPort: 443,
+      managedBy: "simpleui",
+      monitorOnly: false
+    }],
+    users: [{ username: "alice", nodeIds: ["node-a", "node-b", "node-other"] }],
+    bans: [{ id: "ban-1", nodeId: "node-b", target: "198.51.100.4" }],
+    connections: [{ id: "conn-1", nodeId: "node-a" }, { id: "conn-2", nodeId: "node-other" }],
+    remoteTraffic: [{ id: "traffic-1", nodeId: "node-b" }]
+  };
+
+  const removed = removeSimpleUiDeploymentSlotState(state, state.nodes[0]);
+
+  assert.equal(removed, 2);
+  assert.deepEqual(state.nodes.map((node) => node.id), ["node-other"]);
+  assert.deepEqual(state.users[0].nodeIds, ["node-other"]);
+  assert.deepEqual(state.bans, []);
+  assert.deepEqual(state.connections.map((item) => item.nodeId), ["node-other"]);
+  assert.deepEqual(state.remoteTraffic, []);
 });
 
 test("mergeDiscoveredNodes imports sing-box monitor-only protocols", () => {

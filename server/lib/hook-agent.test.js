@@ -6,6 +6,7 @@ import {
   hookFingerprintMatches,
   isLegacyHookActionAllowed,
   isLegacyHookTransport,
+  isHookTlsHandshakeFailure,
   normalizeHookFingerprint
 } from "./hook-agent.js";
 
@@ -22,6 +23,15 @@ test("legacy HTTP hooks may only use upgrade transport actions", () => {
   assert.equal(isLegacyHookActionAllowed("upgrade-agent"), true);
   assert.equal(isLegacyHookActionAllowed("deploy"), false);
   assert.equal(isLegacyHookActionAllowed("exec"), false);
+});
+
+test("TLS handshake failures are recognized as protocol setup failures", () => {
+  assert.equal(
+    isHookTlsHandshakeFailure(new Error("Client network socket disconnected before secure TLS connection was established")),
+    true
+  );
+  assert.equal(isHookTlsHandshakeFailure(Object.assign(new Error("write EPROTO ssl3_get_record:wrong version number"), { code: "EPROTO" })), true);
+  assert.equal(isHookTlsHandshakeFailure(new Error("Hook TLS certificate fingerprint mismatch")), false);
 });
 
 test("install agent script preserves an existing server-bound token", async () => {
