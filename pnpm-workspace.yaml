@@ -1,0 +1,18 @@
+onlyBuiltDependencies:
+  - better-sqlite3
+  - cpu-features
+  - electron
+  - electron-winstaller
+  - esbuild
+  - ssh2
+
+# Keep transitive dependencies above the reviewed security fixes.
+overrides:
+  body-parser: ^2.3.0
+  esbuild: ^0.28.1
+  qs: ^6.16.0
+  shell-quote: ^1.9.0
+  tar: ^7.5.22
+  undici: ^6.28.0
+patchedDependencies:
+  extract-zip@2.0.1: patches/extract-zip@2.0.1.patch

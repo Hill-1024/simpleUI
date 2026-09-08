@@ -69,7 +69,14 @@ function applyRetention(state) {
   for (const [collection, limit] of Object.entries(retentionLimits)) {
     const normalizedLimit = normalizeLimit(limit);
     if (!normalizedLimit || !Array.isArray(next[collection])) continue;
-    next[collection] = next[collection].slice(-normalizedLimit);
+    if (collection === "jobs") {
+      // Active jobs also hold the per-server mutation lock. Never evict them.
+      const active = (job) => ["queued", "running"].includes(job.status);
+      const history = new Set(next.jobs.filter((job) => !active(job)).slice(-normalizedLimit));
+      next.jobs = next.jobs.filter((job) => active(job) || history.has(job));
+    } else {
+      next[collection] = next[collection].slice(-normalizedLimit);
+    }
   }
   return next;
 }

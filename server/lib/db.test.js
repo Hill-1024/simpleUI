@@ -127,6 +127,25 @@ test("public state filters server hook tokens", async () => {
   });
 });
 
+test("retention keeps queued and running jobs while limiting completed history", async () => {
+  await withTempDb(async ({ db }) => {
+    const active = [
+      { id: "queued-deploy", type: "deploy", status: "queued" },
+      { id: "running-deploy", type: "deploy", status: "running" }
+    ];
+    const history = Array.from({ length: 205 }, (_, index) => ({ id: `finished-${index}`, status: "success" }));
+    await db.saveDb({ jobs: [...active, ...history] });
+    const state = await db.loadDb();
+    assert.deepEqual(state.jobs.slice(0, 2), active);
+    assert.equal(state.jobs.length, 202);
+    assert.equal(state.jobs[2].id, "finished-5");
+    await db.mutateDb((next) => { next.jobs[0].status = "failed"; });
+    const updated = await db.loadDb();
+    assert.equal(updated.jobs.length, 201);
+    assert.equal(updated.jobs[0].id, "running-deploy");
+  });
+});
+
 test("public state marks TLS handshake failures as upgradeable hook state", async () => {
   await withTempDb(async ({ db }) => {
     const publicView = db.publicState({

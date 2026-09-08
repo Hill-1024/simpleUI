@@ -337,6 +337,23 @@ async function requireReadyServer(serverId, res) {
   return server;
 }
 
+function readyNodeTargets(state, nodes, res) {
+  const targets = [];
+  for (const node of nodes) {
+    const server = state.servers.find((item) => item.id === node.serverId);
+    if (!server) {
+      res.status(404).json({ error: `Server for node ${node.name} not found` });
+      return null;
+    }
+    if (server.hookStatus !== "online") {
+      res.status(409).json({ error: `${server.name} hook is not ready` });
+      return null;
+    }
+    targets.push({ node, server });
+  }
+  return targets;
+}
+
 async function syncAllStatuses() {
   if (syncInFlight) return { ok: false, skipped: true };
   syncInFlight = true;
@@ -507,7 +524,9 @@ app.patch("/api/servers/:id", async (req, res) => {
     const host = data.host !== undefined ? normalizeHost(data.host) : server.host;
     const hookPort = data.hookPort !== undefined ? data.hookPort : server.hookPort;
     const shouldRefreshHookUrl = Boolean(server.hookUrl || data.host !== undefined || data.hookPort !== undefined);
-    const endpointChanged = data.host !== undefined || data.hookPort !== undefined;
+    const canonicalHost = (value) => normalizeHost(value).toLowerCase().replace(/\.$/, "");
+    const endpointChanged = canonicalHost(host) !== canonicalHost(server.host)
+      || Number(hookPort || DEFAULT_HOOK_PORT) !== Number(server.hookPort || DEFAULT_HOOK_PORT);
     Object.assign(server, stamp({
       ...server,
       ...data,
@@ -1050,17 +1069,10 @@ app.post("/api/hooks/ban", async (req, res) => {
     return;
   }
 
+  const targets = readyNodeTargets(state, nodes, res);
+  if (!targets) return;
   const jobs = [];
-  for (const node of nodes) {
-    const server = state.servers.find((item) => item.id === node.serverId);
-    if (!server) {
-      res.status(404).json({ error: `Server for node ${node.name} not found` });
-      return;
-    }
-    if (server.hookStatus !== "online") {
-      res.status(409).json({ error: `${server.name} hook is not ready` });
-      return;
-    }
+  for (const { node, server } of targets) {
     const job = await runRemoteAction({
       type: "ban",
       title: `Block source IP ${data.targetIp} on ${node.name}`,
@@ -1104,17 +1116,10 @@ app.post("/api/hooks/unban", async (req, res) => {
     return;
   }
 
+  const targets = readyNodeTargets(state, nodes, res);
+  if (!targets) return;
   const jobs = [];
-  for (const node of nodes) {
-    const server = state.servers.find((item) => item.id === node.serverId);
-    if (!server) {
-      res.status(404).json({ error: `Server for node ${node.name} not found` });
-      return;
-    }
-    if (server.hookStatus !== "online") {
-      res.status(409).json({ error: `${server.name} hook is not ready` });
-      return;
-    }
+  for (const { node, server } of targets) {
     const job = await runRemoteAction({
       type: "unban",
       remoteAction: "ban",

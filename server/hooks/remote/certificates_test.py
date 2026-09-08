@@ -194,6 +194,32 @@ class CertificatesTest(unittest.TestCase):
         self.assertEqual(config.read_text(), "original configuration")
         self.assertIn(["systemctl", "restart", "hysteria-server.service"], calls)
 
+    def test_failed_first_deployment_removes_new_config_and_stops_service(self):
+        config = self.root / "new-config.yaml"
+        calls = []
+        with patch.dict(certs.CONFIGS, hysteria2=config), patch.object(certs.common, "service_state", return_value="inactive"), patch.object(certs.common, "capture", return_value="disabled\n"), patch.object(certs.common, "run", side_effect=lambda args, **kw: calls.append(args)):
+            with self.assertRaises(RuntimeError), certs.deployment_transaction("hysteria2"):
+                config.write_text("failed first deployment")
+                raise RuntimeError("restart failed")
+        self.assertFalse(config.exists())
+        self.assertIn(["systemctl", "stop", "hysteria-server.service"], calls)
+        self.assertIn(["systemctl", "disable", "hysteria-server.service"], calls)
+
+    def test_failed_redeployment_preserves_inactive_service_and_file_mode(self):
+        config = self.root / "config.yaml"
+        config.write_text("original configuration")
+        config.chmod(0o600)
+        calls = []
+        with patch.dict(certs.CONFIGS, hysteria2=config), patch.object(certs.common, "service_state", return_value="inactive"), patch.object(certs.common, "capture", return_value="enabled\n"), patch.object(certs.common, "run", side_effect=lambda args, **kw: calls.append(args)), patch.object(os, "chown"):
+            with self.assertRaises(RuntimeError), certs.deployment_transaction("hysteria2"):
+                certs.common.atomic_write(config, "new configuration", 0o640)
+                raise RuntimeError("restart failed")
+        self.assertEqual(config.read_text(), "original configuration")
+        self.assertEqual(config.stat().st_mode & 0o777, 0o600)
+        self.assertIn(["systemctl", "stop", "hysteria-server.service"], calls)
+        self.assertNotIn(["systemctl", "restart", "hysteria-server.service"], calls)
+        self.assertNotIn(["systemctl", "disable", "hysteria-server.service"], calls)
+
     def test_uninstall_keeps_shared_renewal_dependencies(self):
         self.seed()
         path = pathlib.Path(__file__).with_name("uninstall.py")
@@ -205,6 +231,21 @@ class CertificatesTest(unittest.TestCase):
             module.cleanup_trojan()
         self.assertFalse(any("--uninstall" in event or "/root/.acme.sh" in event or "nginx" in event for event in events))
         self.assertTrue(certs.STATE.exists())
+
+    def test_failed_deployment_restores_symlink_target_and_removes_new_metadata(self):
+        target = self.root / "original.yaml"
+        target.write_text("original contents")
+        config = self.root / "config.yaml"
+        config.symlink_to(target)
+        metadata = self.root / "managed.env"
+        with patch.object(certs, "deployment_files", return_value=[config, metadata]), patch.object(certs.common, "service_state", return_value="inactive"), patch.object(certs.common, "capture", return_value="disabled\n"), patch.object(certs.common, "run"), patch.object(os, "chown"):
+            with self.assertRaises(RuntimeError), certs.deployment_transaction("hysteria2"):
+                config.write_text("changed through symlink")
+                metadata.write_text("new deployment")
+                raise RuntimeError("deployment failed")
+        self.assertTrue(config.is_symlink())
+        self.assertEqual(target.read_text(), "original contents")
+        self.assertFalse(metadata.exists())
 
 
 if __name__ == "__main__":

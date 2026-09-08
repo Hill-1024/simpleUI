@@ -1,0 +1,73 @@
+diff --git a/index.js b/index.js
+index 23384ea16bb848616886f356d8d69f94325535bf..61929fff6b226d67271ab51072a2983dff29e7d5 100644
+--- a/index.js
++++ b/index.js
+@@ -10,6 +10,29 @@ const yauzl = require('yauzl')
+ const openZip = promisify(yauzl.open)
+ const pipeline = promisify(stream.pipeline)
+ 
++function assertInside (root, target) {
++  const relative = path.relative(root, target)
++  if (path.isAbsolute(relative) || relative.split(path.sep).includes('..')) {
++    throw new Error(`Out of bound path "${target}"`)
++  }
++}
++
++async function validateTarget (root, target) {
++  assertInside(root, target)
++  let existing = target
++  while (true) {
++    try {
++      assertInside(root, await fs.realpath(existing))
++      return
++    } catch (error) {
++      if (error.code !== 'ENOENT') throw error
++      const parent = path.dirname(existing)
++      if (parent === existing) throw error
++      existing = parent
++    }
++  }
++}
++
+ class Extractor {
+   constructor (zipPath, opts) {
+     this.zipPath = zipPath
+@@ -53,12 +76,13 @@ class Extractor {
+         const destDir = path.dirname(path.join(this.opts.dir, entry.fileName))
+ 
+         try {
++          await validateTarget(this.opts.dir, destDir)
+           await fs.mkdir(destDir, { recursive: true })
+ 
+           const canonicalDestDir = await fs.realpath(destDir)
+           const relativeDestDir = path.relative(this.opts.dir, canonicalDestDir)
+ 
+-          if (relativeDestDir.split(path.sep).includes('..')) {
++          if (path.isAbsolute(relativeDestDir) || relativeDestDir.split(path.sep).includes('..')) {
+             throw new Error(`Out of bound path "${canonicalDestDir}" found while processing file ${entry.fileName}`)
+           }
+ 
+@@ -121,11 +145,23 @@ class Extractor {
+     await fs.mkdir(destDir, mkdirOptions)
+     if (isDir) return
+ 
++    if (!symlink) {
++      try {
++        if ((await fs.lstat(dest)).isSymbolicLink()) {
++          throw new Error(`Refusing to overwrite symbolic link "${dest}"`)
++        }
++      } catch (error) {
++        if (error.code !== 'ENOENT') throw error
++      }
++    }
++
+     debug('opening read stream', dest)
+     const readStream = await promisify(this.zipfile.openReadStream.bind(this.zipfile))(entry)
+ 
+     if (symlink) {
+       const link = await getStream(readStream)
++      if (path.isAbsolute(link)) throw new Error(`Out of bound symlink "${link}"`)
++      await validateTarget(this.opts.dir, path.resolve(path.dirname(dest), link))
+       debug('creating symlink', link, dest)
+       await fs.symlink(link, dest)
+     } else {

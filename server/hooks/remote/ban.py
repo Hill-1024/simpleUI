@@ -3,6 +3,7 @@ import ipaddress
 import json
 import os
 import pathlib
+import shlex
 import subprocess
 from datetime import datetime, timezone
 
@@ -67,8 +68,8 @@ def remove_iptables_rule(tool, proto, source_ip, port):
 def ensure_nft_chain():
     if not common.command_exists("nft"):
         return False
-    common.run(["nft", "add", "table", "inet", "simpleui"], check=False)
-    common.run(["nft", "add", "chain", "inet", "simpleui", "input", "{ type filter hook input priority -10; policy accept; }"], check=False)
+    common.run(["nft", "add", "table", "inet", "simpleui"])
+    common.run(["nft", "add", "chain", "inet", "simpleui", "input", "{ type filter hook input priority -10; policy accept; }"])
     return True
 
 
@@ -81,22 +82,56 @@ def add_nft_rule(proto, family, source_ip, port):
         args.extend(["meta", "l4proto", proto, "th", "dport", str(port), family_expr, "saddr", source_ip, "drop"])
     else:
         args.extend([family_expr, "saddr", source_ip, "drop"])
-    common.run(args, check=False)
+    common.run(args)
+
+
+def nft_rule_handle(line, proto, family, source_ip, port):
+    """Match the complete rule we generate, never an IP/port substring."""
+    try:
+        tokens = shlex.split(line)
+    except ValueError:
+        return None
+    if len(tokens) < 7 or tokens[-3:-1] != ["#", "handle"] or not tokens[-1].isdigit():
+        return None
+    handle, rule = tokens[-1], tokens[:-3]
+    if len(rule) >= 2 and rule[-2] == "comment":
+        rule = rule[:-2]
+    if not rule or rule[-1] != "drop":
+        return None
+    rule = rule[:-1]
+    family_expr = "ip6" if family == 6 else "ip"
+    for index in range(len(rule) - 2):
+        if rule[index:index + 2] != [family_expr, "saddr"]:
+            continue
+        try:
+            if ipaddress.ip_network(rule[index + 2], strict=False) != ipaddress.ip_network(source_ip, strict=False):
+                return None
+        except ValueError:
+            return None
+        remaining = rule[:index] + rule[index + 3:]
+        if not port:
+            return handle if not remaining else None
+        expected_port = str(port)
+        numeric_proto = "6" if proto == "tcp" else "17"
+        supported = [
+            [proto, "dport", expected_port],
+            ["meta", "l4proto", proto, "th", "dport", expected_port],
+            ["meta", "l4proto", numeric_proto, "th", "dport", expected_port],
+            ["meta", "l4proto", proto, proto, "dport", expected_port],
+            ["meta", "l4proto", numeric_proto, proto, "dport", expected_port],
+        ]
+        return handle if remaining in supported else None
+    return None
 
 
 def remove_nft_rule(proto, family, source_ip, port):
     if not common.command_exists("nft"):
         return
-    family_expr = "ip6 saddr" if family == 6 else "ip saddr"
-    output = common.capture(["nft", "-a", "list", "chain", "inet", "simpleui", "input"])
+    output = common.capture(["nft", "-a", "-n", "list", "chain", "inet", "simpleui", "input"])
     for line in output.splitlines():
-        if family_expr not in line or source_ip not in line:
-            continue
-        if port and (f"dport {port}" not in line or proto not in line):
-            continue
-        handle = line.split()[-1] if line.split() else ""
+        handle = nft_rule_handle(line, proto, family, source_ip, port)
         if handle:
-            common.run(["nft", "delete", "rule", "inet", "simpleui", "input", "handle", handle], check=False)
+            common.run(["nft", "delete", "rule", "inet", "simpleui", "input", "handle", handle])
 
 
 def apply_firewall(action, source_ip, family, protocols, port):

@@ -38,25 +38,51 @@ def managed(protocol):
     return common.read_env_file(f"/etc/simpleui/{protocol}/managed.env")
 
 
-@contextlib.contextmanager
-def deployment_transaction(protocol):
+def deployment_files(protocol):
     files = [CONFIGS[protocol], pathlib.Path(f"/etc/systemd/system/{SERVICES[protocol]}")]
     files += list(pathlib.Path(f"/etc/simpleui/{protocol}").glob("*"))
     if protocol == "hysteria2":
         files += [pathlib.Path(f"/etc/hy2config/{name}") for name in ("simpleui.env", "share-links.json", "hy2_url_scheme.txt")]
-    snapshots = {path: (path.read_bytes(), path.stat()) for path in files if path.is_file()}
-    active = common.service_state(SERVICES[protocol]) == "active"
+    return files
+
+
+@contextlib.contextmanager
+def deployment_transaction(protocol):
+    snapshots = {}
+    for path in deployment_files(protocol):
+        if path.is_symlink():
+            snapshots[path] = (os.readlink(path), path.lstat(), True)
+            if path.is_file():
+                target = path.resolve()
+                snapshots[target] = (target.read_bytes(), target.stat(), False)
+        elif path.is_file():
+            snapshots[path] = (path.read_bytes(), path.stat(), False)
+    service = SERVICES[protocol]
+    active = common.service_state(service) == "active"
+    enabled = common.capture(["systemctl", "is-enabled", service]).strip() in ("enabled", "enabled-runtime")
     try:
         yield
     except BaseException:
-        for path, (content, stat) in snapshots.items():
+        # A failed start may leave a process running or restarting with the new config.
+        common.run(["systemctl", "stop", service], check=False)
+        if not enabled:
+            common.run(["systemctl", "disable", service], check=False)
+        for path in deployment_files(protocol):
+            if path not in snapshots and (path.is_file() or path.is_symlink()):
+                path.unlink()
+        for path, (content, stat, symlink) in snapshots.items():
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(content)
-            os.chmod(path, stat.st_mode & 0o777)
-            os.chown(path, stat.st_uid, stat.st_gid)
+            path.unlink(missing_ok=True)
+            if symlink:
+                path.symlink_to(content)
+                os.chown(path, stat.st_uid, stat.st_gid, follow_symlinks=False)
+            else:
+                path.write_bytes(content)
+                os.chmod(path, stat.st_mode & 0o777)
+                os.chown(path, stat.st_uid, stat.st_gid)
+        common.run(["systemctl", "daemon-reload"], check=False)
         if active:
-            common.run(["systemctl", "daemon-reload"], check=False)
-            common.run(["systemctl", "restart", SERVICES[protocol]], check=False)
+            common.run(["systemctl", "restart", service], check=False)
         raise
 
 

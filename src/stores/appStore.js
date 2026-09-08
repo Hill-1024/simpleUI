@@ -45,7 +45,7 @@ const projectInfo = {
   version: __APP_VERSION__,
   author: __APP_AUTHOR__,
   homepage: __APP_HOMEPAGE__,
-  releaseDate: "2026-05-08"
+  releaseDate: "2026-09-08"
 };
 const releaseTargets = [
   { platform: "Windows", arch: "x64", packages: "exe / zip" },
