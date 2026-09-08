@@ -27,6 +27,8 @@ const {
   editingNodeName,
   readyServers,
   currentProvider,
+  sharedCertificatePeer,
+  effectiveTlsMode,
   isHy2,
   isPasswordAuthProtocol,
   hasFixedListenPort,
@@ -36,7 +38,7 @@ const {
 } = useAppBindings();
 
 const acmeEmailVisible = computed(() => {
-  return deployProtocol.value === "trojan" || (isHy2.value && ["acme-http", "acme-dns"].includes(deployNode.value.tlsMode));
+  return ["acme-http", "acme-dns"].includes(effectiveTlsMode.value);
 });
 
 const passwordLabel = computed(() => {
@@ -97,8 +99,8 @@ const passwordPlaceholder = computed(() =>
           <TextField
             v-model="deployNode.domain"
             label="域名 / 连接地址"
-            :required="!(isHy2 && deployNode.tlsMode === 'self-signed')"
-            :placeholder="isHy2 && deployNode.tlsMode === 'self-signed' ? '留空按 IP 模式自动获取' : ''"
+            :required="!(isHy2 && effectiveTlsMode === 'self-signed')"
+            :placeholder="isHy2 && effectiveTlsMode === 'self-signed' ? '留空按 IP 模式自动获取' : ''"
           />
           <TextField
             v-model.number="deployNode.listenPort"
@@ -108,9 +110,10 @@ const passwordPlaceholder = computed(() =>
             :disabled="hasFixedListenPort"
           />
           <Select
-            v-model="deployNode.tlsMode"
+            :model-value="effectiveTlsMode"
+            @update:model-value="deployNode.tlsMode = $event"
             label="证书模式"
-            :disabled="deployProtocol === 'trojan'"
+            :disabled="!!sharedCertificatePeer"
           >
             <option
               v-for="mode in currentProvider?.certificateModes || []"
@@ -129,9 +132,16 @@ const passwordPlaceholder = computed(() =>
           />
         </div>
 
+        <p v-if="sharedCertificatePeer" class="type-body-sm text-onSurfaceVariant" role="status">
+          本机已有 {{ sharedCertificatePeer.protocol === 'trojan' ? 'Trojan' : 'HY2' }} 节点，将共用它的证书。分享链接会使用该证书的 SNI；证书续期后两个服务都会更新。
+        </p>
+        <p v-else-if="effectiveTlsMode === 'shared-cert'" class="type-body-sm text-onSurfaceVariant">
+          使用这台服务器已经保存的共享证书，分享链接会使用该证书的 SNI。
+        </p>
+
         <!-- ACME DNS extras -->
         <div
-          v-if="isHy2 && deployNode.tlsMode === 'acme-dns'"
+          v-if="isHy2 && effectiveTlsMode === 'acme-dns'"
           class="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
         >
           <Select v-model="deployNode.dnsProvider" label="DNS 提供商">
@@ -145,6 +155,7 @@ const passwordPlaceholder = computed(() =>
           <TextField
             v-model="deployNode.dnsToken"
             label="DNS Token / API Key"
+            :helper="deployNode.dnsProvider === 'godaddy' ? '格式：API_KEY:API_SECRET' : ''"
             type="password"
             required
           />
@@ -161,7 +172,7 @@ const passwordPlaceholder = computed(() =>
 
         <!-- Self-signed -->
         <div
-          v-if="isHy2 && deployNode.tlsMode === 'self-signed'"
+          v-if="isHy2 && effectiveTlsMode === 'self-signed'"
           class="grid gap-3 grid-cols-1 sm:grid-cols-3"
         >
           <TextField
@@ -183,7 +194,7 @@ const passwordPlaceholder = computed(() =>
 
         <!-- Manual cert -->
         <div
-          v-if="isHy2 && deployNode.tlsMode === 'manual-cert'"
+          v-if="effectiveTlsMode === 'manual-cert'"
           class="grid gap-3 grid-cols-1 sm:grid-cols-2"
         >
           <TextField

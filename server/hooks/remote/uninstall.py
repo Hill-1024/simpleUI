@@ -7,6 +7,7 @@ import shutil
 import subprocess
 
 import common
+import certificates
 
 
 MANAGED_FILE = "/etc/simpleui/managed-protocols"
@@ -169,7 +170,7 @@ def cleanup_hysteria2():
         common.rm_f("/usr/local/bin/hysteria", "/usr/bin/hysteria")
         common.rm_rf("/etc/hysteria")
 
-    if tls_mode == "self-signed" and cert_name:
+    if tls_mode == "self-signed" and cert_name and not certificates.STATE.exists():
         common.rm_f(
             f"/etc/ssl/private/{cert_name}.key",
             f"/etc/ssl/private/{cert_name}.crt",
@@ -228,7 +229,9 @@ def cleanup_trojan():
         common.rm_rf("/usr/local/etc/trojan")
         common.rm_rf("/etc/trojan")
 
-    if os.path.exists("/etc/simpleui/trojan/original-nginx.conf"):
+    if certificates.STATE.exists():
+        common.log("Keeping nginx and acme.sh for the shared certificate renewal")
+    elif os.path.exists("/etc/simpleui/trojan/original-nginx.conf"):
         common.mkdir("/etc/nginx")
         shutil.copy2("/etc/simpleui/trojan/original-nginx.conf", "/etc/nginx/nginx.conf")
         common.systemctl("restart", "nginx")
@@ -249,7 +252,7 @@ def cleanup_trojan():
                 common.rm_rf(item)
         common.rm_f("/etc/systemd/system/multi-user.target.wants/nginx.service")
 
-    if had_acme == "0":
+    if had_acme == "0" and not certificates.STATE.exists():
         common.run(["/root/.acme.sh/acme.sh", "--uninstall"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         common.rm_rf("/root/.acme.sh")
 
@@ -342,6 +345,7 @@ def main():
         return
 
     cleanup_bans()
+    certificates.cleanup_shared_certificate()
     common.run(["nft", "delete", "table", "inet", "simpleui_traffic"], check=False)
     common.rm_f(MANAGED_FILE)
     common.rm_rf("/etc/simpleui")
@@ -352,4 +356,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    with certificates.deployment_lock():
+        main()

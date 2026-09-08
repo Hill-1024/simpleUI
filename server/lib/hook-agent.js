@@ -12,6 +12,7 @@ const activeHookRequests = new Set();
 
 const hookNames = [
   "common.py",
+  "certificates.py",
   "hysteria2-deploy.py",
   "trojan-deploy.py",
   "server-status.py",

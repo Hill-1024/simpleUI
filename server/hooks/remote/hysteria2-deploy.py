@@ -6,6 +6,7 @@ import subprocess
 from urllib.parse import quote
 
 import common
+import certificates
 
 
 WORKDIR = pathlib.Path("/opt/simpleui/upstream/hysteria2")
@@ -61,7 +62,7 @@ def install_upstream_flow():
     common.log("Installing Python-flow dependencies from phy2.sh")
     common.run(["bash", "./phy2.sh"], cwd=WORKDIR, env=installer_env())
 
-    installed_core = "0"
+    installed_core = common.read_env_file("/etc/simpleui/hysteria2/managed.env").get("SIMPLEUI_INSTALLED_CORE", "0")
     binary_present = hysteria_binary_exists()
     services_present = hysteria_service_units_exist()
     if not binary_present:
@@ -218,122 +219,21 @@ def detect_public_host(mode):
 
 
 def tls_config(tls_mode, domain, email, connect_host):
-    cert_dir = "/etc/ssl/private"
     sni = domain
-    insecure = "0"
-
     if tls_mode == "self-signed":
-        cert_name = common.env("SIMPLEUI_SELF_SIGNED_DOMAIN", "bing.com")
-        sni = cert_name
-        insecure = "1"
+        sni = common.env("SIMPLEUI_SELF_SIGNED_DOMAIN", "bing.com")
+        connect_host = connect_host or detect_public_host(common.env("SIMPLEUI_SELF_SIGNED_IP_MODE", "ipv4"))
         if not connect_host:
-            connect_host = detect_public_host(common.env("SIMPLEUI_SELF_SIGNED_IP_MODE", "ipv4"))
-        if not connect_host:
-            common.log("Self-signed mode could not detect the public connection address")
-            raise SystemExit(32)
-        if not domain:
-            domain = connect_host
-        common.log(f"Generating self-signed certificate for {cert_name}")
-        common.mkdir(cert_dir, 0o755)
-        common.run(["openssl", "ecparam", "-name", "prime256v1", "-out", f"{cert_dir}/ec_param.pem"])
-        common.run(
-            [
-                "openssl",
-                "req",
-                "-x509",
-                "-nodes",
-                "-newkey",
-                f"ec:{cert_dir}/ec_param.pem",
-                "-keyout",
-                f"{cert_dir}/{cert_name}.key",
-                "-out",
-                f"{cert_dir}/{cert_name}.crt",
-                "-subj",
-                f"/CN={cert_name}",
-                "-days",
-                "36500",
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        if common.run(["id", "hysteria"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
-            common.run(["chown", "root:hysteria", f"{cert_dir}/{cert_name}.key", f"{cert_dir}/{cert_name}.crt", f"{cert_dir}/ec_param.pem"], check=False)
-        common.chmod(f"{cert_dir}/{cert_name}.key", 0o644)
-        common.chmod(f"{cert_dir}/{cert_name}.crt", 0o644)
-        block = (
-            "tls:\n"
-            f"  cert: {common.yaml_value(f'{cert_dir}/{cert_name}.crt')}\n"
-            f"  key: {common.yaml_value(f'{cert_dir}/{cert_name}.key')}"
-        )
-        return domain, connect_host, sni, insecure, cert_dir, block
-
-    if tls_mode == "manual-cert":
-        cert_path = common.env("SIMPLEUI_CERT_PATH")
-        key_path = common.env("SIMPLEUI_KEY_PATH")
-        if not cert_path or not key_path:
-            common.log("Manual certificate mode requires certificate and private key paths")
-            raise SystemExit(32)
-        common.log("Using manual Hysteria2 certificate paths")
-        block = (
-            "tls:\n"
-            f"  cert: {common.yaml_value(cert_path)}\n"
-            f"  key: {common.yaml_value(key_path)}"
-        )
-        return domain, connect_host, sni, insecure, cert_dir, block
-
-    if tls_mode in {"acme-dns", "acme-dns-cloudflare"}:
-        dns_provider = common.env("SIMPLEUI_DNS_PROVIDER", "cloudflare")
-        if tls_mode == "acme-dns-cloudflare":
-            dns_provider = "cloudflare"
-        dns_token = common.env("SIMPLEUI_DNS_TOKEN")
-        if not dns_token:
-            common.log("ACME DNS mode requires a DNS provider token")
-            raise SystemExit(32)
-        common.log(f"Configuring Hysteria2 ACME DNS certificate for {domain} via {dns_provider}")
-        dns_config = {
-            "cloudflare": ("cloudflare", [("cloudflare_api_token", dns_token)]),
-            "duckdns": ("duckdns", [("duckdns_api_token", dns_token)]),
-            "gandi": ("gandi", [("gandi_api_token", dns_token)]),
-            "godaddy": ("godaddy", [("godaddy_api_token", dns_token)]),
-            "namedotcom": ("namedotcom", [
-                ("namedotcom_token", dns_token),
-                ("namedotcom_user", common.env("SIMPLEUI_DNS_USER")),
-                ("namedotcom_server", common.env("SIMPLEUI_DNS_SERVER", "api.name.com")),
-            ]),
-            "name.com": ("namedotcom", [
-                ("namedotcom_token", dns_token),
-                ("namedotcom_user", common.env("SIMPLEUI_DNS_USER")),
-                ("namedotcom_server", common.env("SIMPLEUI_DNS_SERVER", "api.name.com")),
-            ]),
-            "vultr": ("vultr", [("vultr_api_key", dns_token)]),
-        }
-        if dns_provider not in dns_config:
-            common.log(f"Unsupported ACME DNS provider: {dns_provider}")
-            raise SystemExit(32)
-        name, entries = dns_config[dns_provider]
-        if name == "duckdns" and common.env("SIMPLEUI_DNS_OVERRIDE_DOMAIN"):
-            entries.append(("duckdns_override_domain", common.env("SIMPLEUI_DNS_OVERRIDE_DOMAIN")))
-        config_lines = [f"    name: {name}", "    config:"]
-        config_lines.extend(f"      {key}: {common.yaml_value(value)}" for key, value in entries)
-        block = (
-            "acme:\n"
-            "  domains:\n"
-            f"    - {common.yaml_value(domain)}\n"
-            f"  email: {common.yaml_value(email)}\n"
-            "  type: dns\n"
-            "  dns:\n"
-            + "\n".join(config_lines)
-        )
-        return domain, connect_host, sni, insecure, cert_dir, block
-
-    common.log(f"Configuring Hysteria2 ACME HTTP certificate for {domain}")
-    block = (
-        "acme:\n"
-        "  domains:\n"
-        f"    - {common.yaml_value(domain)}\n"
-        f"  email: {common.yaml_value(email)}"
-    )
-    return domain, connect_host, sni, insecure, cert_dir, block
+            raise SystemExit("Self-signed mode could not detect the public connection address")
+        domain = domain or connect_host
+    record = certificates.ensure_certificate("hysteria2", tls_mode, domain, sni)
+    cert, key = certificates.paths(record)
+    if record["mode"] == "manual-cert":
+        for path in (cert, key):
+            if common.run(["runuser", "-u", "hysteria", "--", "test", "-r", path], check=False).returncode:
+                raise SystemExit("The hysteria service user needs read access to the manual certificate and private key")
+    os.environ.update(certificates.certificate_env(record))
+    return domain, connect_host or domain, record["sni"], "1" if record.get("insecure") else "0", str(certificates.ROOT), certificates.tls_block(record)
 
 
 def uri_host(value):
@@ -370,24 +270,6 @@ def write_share_links(connect_host, port, sni, insecure, obfs_enabled, obfs_pass
     common.write_text(out_dir / "hy2_url_scheme.txt", scheme_text, 0o600)
     common.write_text(out_dir / "share-links.json", json.dumps(links, ensure_ascii=False, indent=2), 0o600)
     return links
-
-
-def download_subscription_templates(first_link):
-    common.log("Downloading subscription templates for the first generated Hysteria2 link")
-    if not first_link:
-        return
-    encoded = quote(first_link, safe="")
-    url_rule = "&ua=&selectedRules=%22balanced%22&customRules=%5B%5D"
-    targets = {
-        "clash": "/etc/hy2config/clash.yaml",
-        "singbox": "/etc/hy2config/sing-box.yaml",
-        "surge": "/etc/hy2config/surge.yaml",
-    }
-    for name, target in targets.items():
-        try:
-            common.download(f"https://sub.baibaicat.site/{name}?config={encoded}{url_rule}", target)
-        except subprocess.CalledProcessError:
-            pass
 
 
 def main():
@@ -431,7 +313,7 @@ def main():
         )
         jump_mport = f"{jump_port_start}-{jump_port_end}"
 
-    if installed_core != "1":
+    if installed_core != "1" and not common.read_env_file("/etc/simpleui/hysteria2/managed.env"):
         common.copy_if_missing("/etc/hysteria/config.yaml", "/etc/simpleui/hysteria2/original-config.yaml")
 
     domain, connect_host, sni, insecure, cert_dir, tls_block = tls_config(tls_mode, domain, email, connect_host)
@@ -480,7 +362,9 @@ ignoreClientBandwidth: {brutal}
 {obfs_block}
 {sniff_block}
 """
-    common.write_text("/etc/hysteria/config.yaml", config)
+    common.atomic_write("/etc/hysteria/config.yaml", config, 0o640)
+    import grp
+    os.chown("/etc/hysteria/config.yaml", 0, grp.getgrnam("hysteria").gr_gid)
 
     common.write_text(
         "/etc/hy2config/simpleui.env",
@@ -507,7 +391,7 @@ SIMPLEUI_JUMP_PORT_IPV6_INTERFACE={jump_port_ipv6_interface}
         common.env("SIMPLEUI_OBFS_PASSWORD"),
         jump_mport,
     )
-    download_subscription_templates(links[0]["uri"] if links else "")
+    # Share links contain passwords; never send them to an external subscription service.
 
     common.write_text(
         "/etc/simpleui/hysteria2/managed.env",
@@ -521,6 +405,10 @@ SIMPLEUI_TLS_MODE={tls_mode}
 SIMPLEUI_INSTALLED_CORE={installed_core}
 SIMPLEUI_CERT_DIR={cert_dir}
 SIMPLEUI_CERT_NAME={sni}
+SIMPLEUI_SNI={sni}
+SIMPLEUI_INSECURE={insecure}
+SIMPLEUI_CERT_PATH={common.env("SIMPLEUI_CERT_PATH")}
+SIMPLEUI_KEY_PATH={common.env("SIMPLEUI_KEY_PATH")}
 SIMPLEUI_JUMP_PORT_START={jump_port_start}
 SIMPLEUI_JUMP_PORT_END={jump_port_end}
 SIMPLEUI_JUMP_PORT_INTERFACE={jump_port_interface}
@@ -530,8 +418,9 @@ SIMPLEUI_JUMP_PORT_IPV6_INTERFACE={jump_port_ipv6_interface}
     )
 
     common.run(["systemctl", "daemon-reload"])
-    common.run(["systemctl", "enable", "--now", "hysteria-server.service"])
+    common.run(["systemctl", "enable", "hysteria-server.service"])
     common.run(["systemctl", "restart", "hysteria-server.service"])
+    common.run(["systemctl", "is-active", "--quiet", "hysteria-server.service"])
 
     common.log("Hysteria2 deployed through Python-maintained upstream flow")
     common.emit("__SIMPLEUI_RESULT__", {
@@ -540,10 +429,16 @@ SIMPLEUI_JUMP_PORT_IPV6_INTERFACE={jump_port_ipv6_interface}
         "domain": domain,
         "connectHost": connect_host,
         "port": int(port),
+        "tlsMode": tls_mode,
+        "certPath": common.env("SIMPLEUI_CERT_PATH"),
+        "keyPath": common.env("SIMPLEUI_KEY_PATH"),
+        "sni": sni,
+        "insecure": insecure == "1",
         "jumpPortStart": jump_port_start,
         "jumpPortEnd": jump_port_end,
     })
 
 
 if __name__ == "__main__":
-    main()
+    with certificates.deployment_lock(), certificates.deployment_transaction("hysteria2"):
+        main()

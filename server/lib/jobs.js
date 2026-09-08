@@ -658,6 +658,8 @@ export function mergeDiscoveredNodes(state, server, discoveredNodes = [], { time
       endpoint: discoveryEndpoint(server, discovered, listenPort),
       listenPort,
       tlsMode,
+      sni: cleanText(discovered.sni) || existing?.sni || "",
+      insecure: discovered.insecure ?? existing?.insecure ?? false,
       selfSignedHost: cleanText(discovered.selfSignedHost) || existing?.selfSignedHost || "",
       certPath: cleanText(discovered.certPath) || existing?.certPath || "",
       keyPath: cleanText(discovered.keyPath) || existing?.keyPath || "",
@@ -1151,6 +1153,20 @@ export function removeSimpleUiDeploymentSlotState(state, node) {
   return ids.size;
 }
 
+export async function recoverInterruptedJobs() {
+  await mutateDb((state) => {
+    for (const job of state.jobs || []) {
+      if (!["queued", "running"].includes(job.status)) continue;
+      job.status = "failed";
+      job.error = "面板已重启，远端任务结果未知，请刷新服务器状态后确认。";
+      job.updatedAt = new Date().toISOString();
+    }
+    for (const node of state.nodes || []) {
+      if (node.status === "updating") node.status = "warning";
+    }
+  });
+}
+
 export async function createJob({ type, title, payload }) {
   const job = {
     id: uuid(),
@@ -1168,6 +1184,11 @@ export async function createJob({ type, title, payload }) {
   };
   await mutateDb((state) => {
     state.jobs = state.jobs || [];
+    const mutations = ["deploy", "node-update", "node-delete", "server-delete", "hook-upgrade"];
+    if (mutations.includes(type) && state.jobs.some((item) => mutations.includes(item.type)
+      && item.payload?.serverId === job.payload.serverId && ["queued", "running"].includes(item.status))) {
+      throw Object.assign(new Error("这台服务器已有部署或维护任务在执行，请等待完成后再操作"), { status: 409 });
+    }
     state.jobs.push(job);
     appendAudit(state, `job.${type}`, `${title} queued`, { jobId: job.id });
   });
@@ -1373,6 +1394,10 @@ export async function runDeployJob(job, { server, node, users }) {
     });
     await logJob(job.id, remote.output || "", secrets);
     const result = parseMarker(remote.output, "__SIMPLEUI_RESULT__");
+    if (!result || result.protocol !== node.protocol) throw new Error("Hook returned no valid deployment result; upgrade the server Hook and retry");
+    for (const key of ["tlsMode", "certPath", "keyPath", "sni", "insecure", "domain"]) {
+      if (result[key] !== undefined) node[key] = result[key];
+    }
     if (result?.port) node.listenPort = Number(result.port);
     if (result?.jumpPortStart) node.jumpPortStart = Number(result.jumpPortStart);
     if (result?.jumpPortEnd) node.jumpPortEnd = Number(result.jumpPortEnd);
@@ -1452,6 +1477,14 @@ export async function runDeployJob(job, { server, node, users }) {
   } catch (error) {
     const safeError = redact(error.message, secrets);
     await patchJob(job.id, { status: "failed", error: safeError });
+    await mutateDb((state) => {
+      const saved = state.nodes.find((item) => item.id === node.id);
+      if (saved?.status === "updating") {
+        saved.status = "warning";
+        saved.lastSyncError = safeError;
+        saved.updatedAt = new Date().toISOString();
+      }
+    });
     await logJob(job.id, `Deployment failed: ${safeError}\n`, secrets);
     getStream(job.id).emit("done", { status: "failed", error: safeError });
   }

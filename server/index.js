@@ -22,6 +22,7 @@ import { appendAudit, closeDb, loadDb, mutateDb, publicServer, publicState, stam
 import { DEFAULT_HOOK_PORT, abortHookRequests, checkHookHealth, createHookToken, probeHookCertificate } from "./lib/hook-agent.js";
 import {
   createJob,
+  recoverInterruptedJobs,
   removeNodeState,
   removeServerState,
   runDeleteNodeJob,
@@ -50,6 +51,7 @@ import {
   isValidUserPassword,
   normalizeIpTarget
 } from "./lib/security.js";
+import { nodeSchema, applySharedCertificatePolicy } from "./lib/deployment.js";
 import { closeSshConnections } from "./lib/ssh.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -223,63 +225,6 @@ function hookProtocolFor(server = {}) {
   return "http";
 }
 
-const nodeSchema = z.object({
-  id: z.string().optional(),
-  protocol: z.enum(["hysteria2", "trojan"]),
-  name: z.string().min(1).max(80),
-  group: z.string().max(80).optional(),
-  domain: z.string().max(253).refine(hasNoControlChars, "Domain cannot contain control characters").optional().default(""),
-  listenPort: z.coerce.number().int().min(1).max(65535).default(443),
-  masqueradeUrl: z.string().max(512).refine(hasNoControlChars, "Masquerade URL cannot contain control characters").optional(),
-  tlsMode: z.enum(["self-signed", "acme-http", "acme-dns", "acme-dns-cloudflare", "manual-cert"]).default("acme-http"),
-  acmeEmail: z.string().max(254).refine(hasNoControlChars, "Email cannot contain control characters").optional(),
-  dnsProvider: z.string().max(80).optional(),
-  dnsToken: z.string().max(4096).refine(hasNoControlChars, "DNS token cannot contain control characters").optional(),
-  dnsOverrideDomain: z.string().max(253).refine(hasNoControlChars, "DNS override cannot contain control characters").optional(),
-  dnsUser: z.string().max(128).refine(hasNoControlChars, "DNS user cannot contain control characters").optional(),
-  dnsServer: z.string().max(253).refine(hasNoControlChars, "DNS server cannot contain control characters").optional(),
-  selfSignedDomain: z.string().max(253).refine(hasNoControlChars, "Self-signed domain cannot contain control characters").optional(),
-  selfSignedIpMode: z.enum(["ipv4", "ipv6"]).optional(),
-  selfSignedHost: z.string().max(253).refine(hasNoControlChars, "Self-signed host cannot contain control characters").optional(),
-  certPath: z.string().max(512).refine(hasNoControlChars, "Certificate path cannot contain control characters").optional(),
-  keyPath: z.string().max(512).refine(hasNoControlChars, "Key path cannot contain control characters").optional(),
-  ignoreClientBandwidth: z.coerce.boolean().optional(),
-  obfsEnabled: z.coerce.boolean().optional(),
-  obfsPassword: z.string().max(256).refine(hasNoControlChars, "Obfs password cannot contain control characters").optional(),
-  sniffEnabled: z.coerce.boolean().optional(),
-  portHoppingEnabled: z.coerce.boolean().optional(),
-  jumpPortStart: z.coerce.number().int().min(1).max(65535).optional(),
-  jumpPortEnd: z.coerce.number().int().min(1).max(65535).optional(),
-  jumpPortInterface: z.string().max(80).refine(hasNoControlChars, "Network interface cannot contain control characters").optional(),
-  jumpPortIpv6Enabled: z.coerce.boolean().optional(),
-  jumpPortIpv6Interface: z.string().max(80).refine(hasNoControlChars, "IPv6 network interface cannot contain control characters").optional()
-}).superRefine((node, ctx) => {
-  if (!(node.protocol === "hysteria2" && node.tlsMode === "self-signed") && !node.domain?.trim()) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["domain"], message: "Domain or endpoint is required" });
-  }
-  if (node.protocol !== "hysteria2") return;
-  if ((node.tlsMode === "acme-dns" || node.tlsMode === "acme-dns-cloudflare") && !node.dnsToken?.trim()) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["dnsToken"], message: "ACME DNS requires provider token" });
-  }
-  if (node.tlsMode === "manual-cert") {
-    if (!node.certPath?.trim()) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["certPath"], message: "Certificate path is required" });
-    if (!node.keyPath?.trim()) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["keyPath"], message: "Private key path is required" });
-  }
-  if (node.obfsEnabled && !node.obfsPassword?.trim()) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["obfsPassword"], message: "Obfs password is required" });
-  }
-  if (node.portHoppingEnabled) {
-    if (!node.jumpPortInterface?.trim()) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["jumpPortInterface"], message: "Network interface is required" });
-    if (!node.jumpPortStart) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["jumpPortStart"], message: "Start port is required" });
-    if (!node.jumpPortEnd) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["jumpPortEnd"], message: "End port is required" });
-    if (node.jumpPortStart && node.jumpPortEnd && node.jumpPortStart > node.jumpPortEnd) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["jumpPortStart"], message: "Start port must be less than or equal to end port" });
-    }
-    if (node.jumpPortIpv6Enabled && !node.jumpPortIpv6Interface?.trim()) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["jumpPortIpv6Interface"], message: "IPv6 network interface is required" });
-    }
-  }
-});
 
 const monitorNodeSchema = z.object({
   protocol: monitorProtocolSchema,
@@ -296,7 +241,10 @@ const monitorNodeSchema = z.object({
 function parseBody(schema, req, res) {
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
+    res.status(400).json({
+      error: parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; "),
+      details: parsed.error.flatten()
+    });
     return null;
   }
   return parsed.data;
@@ -726,6 +674,7 @@ app.post("/api/deployments", async (req, res) => {
     return;
   }
 
+  data.node = applySharedCertificatePolicy(state.nodes, server.id, data.node);
   const node = {
     ...data.node,
     listenPort: data.node.protocol === "trojan" ? 443 : data.node.listenPort,
@@ -827,6 +776,7 @@ app.patch("/api/nodes/:id", async (req, res) => {
     res.status(409).json({ error: "Server hook is not ready" });
     return;
   }
+  data.node = applySharedCertificatePolicy(state.nodes, server.id, data.node);
   const node = {
     ...existing,
     ...data.node,
@@ -924,6 +874,7 @@ app.delete("/api/nodes/:id", async (req, res) => {
 app.get("/api/jobs/:id/events", async (req, res) => {
   const state = await loadDb();
   const job = state.jobs.find((item) => item.id === req.params.id);
+  if (!job) return res.status(404).json({ error: "Job not found" });
   res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
   res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
@@ -943,7 +894,7 @@ app.get("/api/jobs/:id", async (req, res) => {
 
 app.delete("/api/jobs", async (_req, res) => {
   await mutateDb((state) => {
-    state.jobs = [];
+    state.jobs = state.jobs.filter((job) => ["queued", "running"].includes(job.status));
     appendAudit(state, "jobs.clear", "Task execution records cleared");
   });
   res.json({ ok: true });
@@ -1191,9 +1142,14 @@ if (fs.existsSync(clientDist)) {
   });
 }
 
+app.use((error, _req, res, _next) => {
+  res.status(error.status || 500).json({ error: error.message || "Internal server error" });
+});
+
 let initialSyncTimer = null;
 let syncTimer = null;
 
+await recoverInterruptedJobs();
 const httpServer = app.listen(port, host, () => {
   console.log(`SimpleUI API listening on http://${host}:${port}`);
   if (syncIntervalMs > 0) {

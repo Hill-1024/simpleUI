@@ -54,6 +54,7 @@ test("hook bundle deploys native Python protocol hooks", async () => {
   const bundle = JSON.parse(Buffer.from(await buildHookUpgradeBundleB64(), "base64").toString("utf8"));
   const names = bundle.hooks.map((item) => item.name);
   assert.ok(names.includes("common.py"));
+  assert.ok(names.includes("certificates.py"));
   assert.ok(names.includes("hysteria2-deploy.py"));
   assert.ok(names.includes("trojan-deploy.py"));
   assert.ok(names.includes("server-status.py"));

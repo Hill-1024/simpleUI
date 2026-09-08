@@ -135,6 +135,7 @@ export const providers = {
       "https://raw.githubusercontent.com/seagullz4/hysteria2/main/hysteria2.py"
     ],
     certificateModes: [
+      { id: "shared-cert", label: "复用本机共享证书", requiresDomain: true },
       { id: "acme-http", label: "ACME HTTP", requiresDomain: true },
       { id: "acme-dns", label: "ACME DNS", requiresDomain: true },
       { id: "self-signed", label: "自签证书", requiresDomain: false },
@@ -172,7 +173,9 @@ export const providers = {
       "https://raw.githubusercontent.com/xyz690/Trojan/master/trojan_install.sh"
     ],
     certificateModes: [
-      { id: "acme-http", label: "acme.sh HTTP 自动申请", requiresDomain: true }
+      { id: "acme-http", label: "ACME HTTP（同机共享）", requiresDomain: true },
+      { id: "shared-cert", label: "复用本机共享证书", requiresDomain: true },
+      { id: "manual-cert", label: "手动证书路径", requiresDomain: true }
     ],
     serviceNames: ["trojan.service"],
     configPaths: ["/usr/src/trojan/server.conf", "/usr/local/etc/trojan/config.json"],

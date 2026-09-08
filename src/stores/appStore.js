@@ -223,6 +223,12 @@ const emptyTerminalSession = reactive({
 });
 
 const currentProvider = computed(() => state.providers.find((item) => item.id === deployProtocol.value));
+const sharedCertificatePeer = computed(() => state.nodes.find((node) =>
+  node.serverId === deployServerId.value && node.protocol !== deployProtocol.value
+  && ["hysteria2", "trojan"].includes(node.protocol) && !node.monitorOnly && node.managedBy !== "sing-box"
+));
+const effectiveTlsMode = computed(() => sharedCertificatePeer.value ? "shared-cert" : deployNode.tlsMode);
+
 const monitorProtocolMap = computed(() => Object.fromEntries((state.monitorProtocols || []).map((item) => [item.id, item])));
 const monitorProtocolOptions = computed(() => (state.monitorProtocols || []).filter((item) => !item.deployable));
 const currentManualProtocol = computed(() => monitorProtocolMap.value[manualNodeForm.protocol]);
@@ -1748,7 +1754,7 @@ async function deploy() {
         protocol: deployProtocol.value,
         listenPort: deployProtocol.value === "trojan" ? 443 : deployNode.listenPort,
         name: deployNode.name || `${deployProtocol.value === "hysteria2" ? "HY2" : "Trojan"} ${serverName(deployServerId.value)}`,
-        tlsMode: deployProtocol.value === "trojan" ? "acme-http" : deployNode.tlsMode
+        tlsMode: effectiveTlsMode.value
       },
       users: parseUsers(usersText.value, deployProtocol.value)
     });
@@ -1769,7 +1775,7 @@ async function updateNode() {
         protocol: deployProtocol.value,
         listenPort: deployProtocol.value === "trojan" ? 443 : deployNode.listenPort,
         name: deployNode.name || editingNodeName.value,
-        tlsMode: deployProtocol.value === "trojan" ? "acme-http" : deployNode.tlsMode
+        tlsMode: effectiveTlsMode.value
       },
       users: parseUsers(usersText.value, deployProtocol.value)
     });
@@ -2013,6 +2019,8 @@ watch(
   () => [deployProtocol.value, deployNode.portHoppingEnabled],
   ([protocol]) => {
     if (protocol === "trojan") deployNode.listenPort = 443;
+    const modes = currentProvider.value?.certificateModes || [];
+    if (modes.length && !modes.some((mode) => mode.id === deployNode.tlsMode)) deployNode.tlsMode = "acme-http";
   }
 );
 
@@ -2125,6 +2133,8 @@ function stopApp() {
     blacklistGroupModes,
     emptyTerminalSession,
     currentProvider,
+    sharedCertificatePeer,
+    effectiveTlsMode,
     monitorProtocolMap,
     monitorProtocolOptions,
     currentManualProtocol,

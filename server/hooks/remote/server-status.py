@@ -538,6 +538,10 @@ def discover_nodes():
             "managedBy": "simpleui",
             "importSource": "remote-discovery",
             "monitorOnly": False,
+            "sni": env.get("SIMPLEUI_SNI") or env.get("SIMPLEUI_CERT_NAME") or domain,
+            "insecure": env.get("SIMPLEUI_INSECURE") == "1",
+            "certPath": env.get("SIMPLEUI_CERT_PATH", ""),
+            "keyPath": env.get("SIMPLEUI_KEY_PATH", ""),
         }
         if protocol == "hysteria2":
             jump_start = common.int_or_none(env.get("SIMPLEUI_JUMP_PORT_START"))
@@ -554,9 +558,9 @@ def discover_nodes():
             })
         elif protocol == "trojan":
             node.update({
-                "tlsMode": "acme-http",
-                "certPath": os.path.join(env.get("SIMPLEUI_CERT_DIR") or "/usr/src/trojan-cert", "fullchain.cer"),
-                "keyPath": os.path.join(env.get("SIMPLEUI_CERT_DIR") or "/usr/src/trojan-cert", "private.key"),
+                "tlsMode": env.get("SIMPLEUI_TLS_MODE") or "acme-http",
+                "certPath": env.get("SIMPLEUI_CERT_PATH") or os.path.join(env.get("SIMPLEUI_CERT_DIR") or "/usr/src/trojan-cert", "fullchain.cer"),
+                "keyPath": env.get("SIMPLEUI_KEY_PATH") or os.path.join(env.get("SIMPLEUI_CERT_DIR") or "/usr/src/trojan-cert", "private.key"),
             })
         nodes.append(node)
     nodes.extend(discover_sing_box_nodes(skip_pairs))
