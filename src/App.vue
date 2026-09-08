@@ -52,10 +52,10 @@ onMounted(() => appStore.startApp());
 onUnmounted(() => appStore.stopApp());
 
 const navItems = [
-  { name: "overview", label: "总览", icon: LayoutDashboard, hint: "舰队全景" },
-  { name: "servers", label: "服务器", icon: Server, hint: "Hook 与凭据" },
+  { name: "overview", label: "总览", icon: LayoutDashboard, hint: "运行概况" },
+  { name: "servers", label: "服务器", icon: Server, hint: "接入与维护" },
   { name: "deploy", label: "部署", icon: Rocket, hint: "Hy2 / Trojan" },
-  { name: "nodes", label: "节点", icon: Radio, hint: "运行态与监控" },
+  { name: "nodes", label: "节点", icon: Radio, hint: "状态与监控" },
   { name: "connections", label: "连接封禁", icon: ShieldBan, hint: "IP 黑名单" },
   { name: "tools", label: "工具", icon: Wrench, hint: "优化与诊断" },
   { name: "terminal", label: "终端", icon: Terminal, hint: "远程命令" },
@@ -92,15 +92,15 @@ function dismissToast() {
         <div class="grid place-items-center h-12 w-12 rounded-2xl bg-primary text-onPrimary type-headline-sm specular-edge">S</div>
         <div>
           <h1 class="type-headline-sm text-onSurface">SimpleUI</h1>
-          <p class="type-body-sm text-onSurfaceVariant">Node Console · 持久化 Hook</p>
+          <p class="type-body-sm text-onSurfaceVariant">节点管理</p>
         </div>
       </div>
       <p class="type-body-md text-onSurfaceVariant">
-        请输入首次启动时在 CLI 输出的 UUID 初始密码。
+        首次登录请使用启动终端中显示的初始密码。
       </p>
       <TextField
         v-model="loginForm.password"
-        label="WebUI 密码"
+        label="登录密码"
         type="password"
         autocomplete="current-password"
         autofocus
@@ -119,8 +119,7 @@ function dismissToast() {
         </template>
         登录控制台
       </Button>
-      <div class="flex items-center justify-between">
-        <span class="type-body-sm text-onSurfaceVariant">需要协助?</span>
+      <div class="flex justify-end">
         <ThemeToggle />
       </div>
     </form>
@@ -135,7 +134,7 @@ function dismissToast() {
           <div class="grid place-items-center h-10 w-10 rounded-2xl bg-primary text-onPrimary type-title-md specular-edge">S</div>
           <div class="min-w-0">
             <p class="type-title-md text-onSurface break-words">SimpleUI</p>
-            <p class="type-body-sm text-onSurfaceVariant break-words">Node Console</p>
+            <p class="type-body-sm text-onSurfaceVariant break-words">节点管理</p>
           </div>
         </div>
 

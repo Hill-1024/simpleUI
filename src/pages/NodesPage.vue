@@ -87,7 +87,6 @@ function statusColor(status) {
       v-if="!state.nodes.length"
       :icon="Radio"
       title="还没有节点"
-      description="可以先部署节点,或把已有 sing-box 节点手动加入监控。"
     >
       <template #action>
         <Button

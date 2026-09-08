@@ -49,7 +49,7 @@ const stateColor = computed(() => running.value ? "primary" : "neutral");
 
     <div class="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[2fr_2fr_1fr_auto] items-end">
       <Select v-model="terminalServerId" label="目标服务器" required>
-        <option value="" disabled>选择 hook 已就绪的服务器</option>
+        <option value="" disabled>选择服务器</option>
         <option v-for="server in readyServers" :key="server.id" :value="server.id">
           {{ server.name }}
         </option>
@@ -62,7 +62,7 @@ const stateColor = computed(() => running.value ? "primary" : "neutral");
       />
       <TextField
         v-model.number="activeTerminalSession.timeoutSeconds"
-        label="超时秒"
+        label="超时（秒）"
         type="number"
         :disabled="!terminalServerId"
         :min="1"
@@ -93,7 +93,7 @@ const stateColor = computed(() => running.value ? "primary" : "neutral");
             <span class="h-2.5 w-2.5 rounded-full bg-success/80" />
           </div>
           <span class="type-label-md text-onSurface ml-2">
-            {{ terminalServerId ? `${serverName(terminalServerId)} Terminal` : "Hook Terminal" }}
+            {{ terminalServerId ? `${serverName(terminalServerId)} 终端` : "服务器终端" }}
           </span>
         </div>
         <Chip :color="stateColor" variant="outlined" size="xs">{{ stateLabel }}</Chip>

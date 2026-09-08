@@ -19,6 +19,7 @@ const providers = [
       "https://raw.githubusercontent.com/seagullz4/hysteria2/main/hysteria2.py"
     ],
     certificateModes: [
+      { id: "shared-cert", label: "使用共享证书", requiresDomain: true },
       { id: "acme-http", label: "ACME HTTP", requiresDomain: true },
       { id: "acme-dns", label: "ACME DNS", requiresDomain: true },
       { id: "self-signed", label: "自签证书", requiresDomain: false },
@@ -44,7 +45,11 @@ const providers = [
     branch: "master",
     installMode: "shell",
     installEntrypoints: ["https://raw.githubusercontent.com/xyz690/Trojan/master/trojan_install.sh"],
-    certificateModes: [{ id: "acme-http", label: "acme.sh HTTP 自动申请", requiresDomain: true }],
+    certificateModes: [
+      { id: "acme-http", label: "ACME HTTP", requiresDomain: true },
+      { id: "shared-cert", label: "使用共享证书", requiresDomain: true },
+      { id: "manual-cert", label: "手动证书路径", requiresDomain: true }
+    ],
     capabilities: ["multi-server", "multi-node", "password-auth", "nginx-masquerade", "source-ip-ban", "service-control"]
   }
 ];
@@ -599,7 +604,7 @@ function ipQualityResult(mode = "ipv4", server = "Demo Server") {
       "出口 ASN: AS64500 SimpleUI Example Transit",
       "风险评分: 低",
       "流媒体: Netflix / Disney+ / YouTube Premium 可用",
-      "说明: 这是静态演示数据，没有请求任何第三方检测服务。"
+      "演示数据"
     ].join("\n")
   };
 }

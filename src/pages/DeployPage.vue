@@ -42,13 +42,13 @@ const acmeEmailVisible = computed(() => {
 });
 
 const passwordLabel = computed(() => {
-  if (!isPasswordAuthProtocol.value) return "节点账号 username:password";
+  if (!isPasswordAuthProtocol.value) return "节点账号";
   return `${deployProtocol.value === "trojan" ? "Trojan" : "HY2"} 节点密码`;
 });
 
 const passwordPlaceholder = computed(() =>
   isPasswordAuthProtocol.value
-    ? "strong-password (或 name:strong-password,部署使用密码部分)"
+    ? "输入节点密码"
     : "alice:strong-password"
 );
 </script>
@@ -76,7 +76,7 @@ const passwordPlaceholder = computed(() =>
       >
         <AlertTriangle :size="16" class="shrink-0 mt-0.5" />
         <p class="type-body-sm">
-          正在修改 <strong>{{ editingNodeName }}</strong>。保存后会通过目标服务器 hook 重新部署节点;节点密码、DNS Token 和混淆密码不会保存在面板中,需要重新输入。
+          保存后将重新部署 <strong>{{ editingNodeName }}</strong>。请重新填写节点密码，以及所需的 DNS Token 和混淆密码。
         </p>
       </div>
 
@@ -84,7 +84,7 @@ const passwordPlaceholder = computed(() =>
         <!-- Core fields -->
         <div class="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
           <Select v-model="deployServerId" label="目标服务器" :disabled="!!editingNodeId" required>
-            <option value="" disabled>选择 hook 已就绪的服务器</option>
+            <option value="" disabled>选择服务器</option>
             <option v-for="server in readyServers" :key="server.id" :value="server.id">
               {{ server.name }}
             </option>
@@ -133,10 +133,7 @@ const passwordPlaceholder = computed(() =>
         </div>
 
         <p v-if="sharedCertificatePeer" class="type-body-sm text-onSurfaceVariant" role="status">
-          本机已有 {{ sharedCertificatePeer.protocol === 'trojan' ? 'Trojan' : 'HY2' }} 节点，将共用它的证书。分享链接会使用该证书的 SNI；证书续期后两个服务都会更新。
-        </p>
-        <p v-else-if="effectiveTlsMode === 'shared-cert'" class="type-body-sm text-onSurfaceVariant">
-          使用这台服务器已经保存的共享证书，分享链接会使用该证书的 SNI。
+          与本机 {{ sharedCertificatePeer.protocol === 'trojan' ? 'Trojan' : 'HY2' }} 节点共用证书。
         </p>
 
         <!-- ACME DNS extras -->
@@ -162,7 +159,7 @@ const passwordPlaceholder = computed(() =>
           <TextField
             v-if="deployNode.dnsProvider === 'duckdns'"
             v-model="deployNode.dnsOverrideDomain"
-            label="Duck DNS override_domain"
+            label="Duck DNS 验证域名"
           />
           <template v-if="deployNode.dnsProvider === 'namedotcom'">
             <TextField v-model="deployNode.dnsUser" label="Name.com 用户" />
@@ -187,7 +184,7 @@ const passwordPlaceholder = computed(() =>
           </Select>
           <TextField
             v-model="deployNode.selfSignedHost"
-            label="连接地址覆盖"
+            label="指定连接地址"
             placeholder="留空使用上方地址"
           />
         </div>
@@ -220,9 +217,9 @@ const passwordPlaceholder = computed(() =>
           <Surface variant="soft" radius="lg" padding="md" class="grid gap-5 md:grid-cols-2">
             <div class="flex flex-col gap-3">
               <p class="type-label-lg text-onSurface uppercase">传输</p>
-              <Switch v-model="deployNode.ignoreClientBandwidth" label="Brutal ignoreClientBandwidth" />
+              <Switch v-model="deployNode.ignoreClientBandwidth" label="忽略客户端带宽设置" />
               <Switch v-model="deployNode.obfsEnabled" label="Salamander 混淆" />
-              <Switch v-model="deployNode.sniffEnabled" label="协议嗅探 Sniff" />
+              <Switch v-model="deployNode.sniffEnabled" label="协议嗅探" />
               <TextField
                 v-if="deployNode.obfsEnabled"
                 v-model="deployNode.obfsPassword"
@@ -237,7 +234,7 @@ const passwordPlaceholder = computed(() =>
               <div v-if="deployNode.portHoppingEnabled" class="grid gap-3 grid-cols-1 sm:grid-cols-2">
                 <TextField
                   v-model="deployNode.jumpPortInterface"
-                  label="v4 网络接口"
+                  label="IPv4 网络接口"
                   placeholder="eth0"
                   required
                 />
@@ -260,7 +257,7 @@ const passwordPlaceholder = computed(() =>
                 <TextField
                   v-if="deployNode.jumpPortIpv6Enabled"
                   v-model="deployNode.jumpPortIpv6Interface"
-                  label="v6 网络接口"
+                  label="IPv6 网络接口"
                   placeholder="eth0"
                   required
                 />
@@ -273,17 +270,11 @@ const passwordPlaceholder = computed(() =>
           v-model="usersText"
           :label="passwordLabel"
           :placeholder="passwordPlaceholder"
+          :helper="isPasswordAuthProtocol ? '使用第一行密码。' : '每行一个账号，格式为 username:password。'"
           :rows="4"
           monospace
           required
         />
-
-        <div class="flex flex-col gap-2 type-body-sm text-onSurfaceVariant">
-          <p v-if="isPasswordAuthProtocol">
-            {{ deployProtocol === "trojan" ? "Trojan" : "HY2" }} 按上游脚本写入 password auth,仅第一行密码用于本次节点鉴权。
-          </p>
-          <p>部署动作由目标服务器上的持久化 hook 执行,不再需要重新输入 SSH 凭据。</p>
-        </div>
 
         <div class="flex gap-2">
           <Button

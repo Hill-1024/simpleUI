@@ -70,7 +70,7 @@ function statusIconClass(status) {
         <Chip :color="statusColor(activePageTask.status)" variant="tonal" size="sm" dot>
           {{ statusLabel(activePageTask.status) }}
         </Chip>
-        <IconButton variant="standard" size="sm" label="清除反馈" @click="clearPageTaskFeedback()">
+        <IconButton variant="standard" size="sm" label="关闭任务卡片" @click="clearPageTaskFeedback()">
           <X :size="14" />
         </IconButton>
       </div>
@@ -110,7 +110,7 @@ function statusIconClass(status) {
         >
           <summary class="cursor-pointer type-label-md text-primary list-none flex items-center gap-1.5 select-none">
             <ScrollText :size="13" />
-            Hook 输出
+            执行日志
           </summary>
           <pre
             class="mt-2 max-h-[260px] overflow-auto rounded-xl bg-surfaceContainerLowest/80 border border-outlineVariant/30 px-3 py-2 font-mono type-body-sm whitespace-pre-wrap"

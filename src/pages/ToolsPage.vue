@@ -77,7 +77,7 @@ const feedbackIcon = computed(() => {
       </header>
 
       <Select v-model="toolServerId" label="目标服务器" required>
-        <option value="" disabled>选择 hook 已就绪的服务器</option>
+        <option value="" disabled>选择服务器</option>
         <option v-for="server in readyServers" :key="server.id" :value="server.id">
           {{ server.name }}
         </option>
@@ -98,7 +98,7 @@ const feedbackIcon = computed(() => {
             <component :is="feedbackIcon" :size="16" :class="['queued', 'running'].includes(toolFeedback.status) ? 'spin' : ''" />
           </span>
           <div class="min-w-0">
-            <p class="type-label-md text-onSurfaceVariant">工具反馈</p>
+            <p class="type-label-md text-onSurfaceVariant">工具任务</p>
             <p class="type-title-md text-onSurface break-words">{{ toolFeedback.title }}</p>
             <p class="type-body-sm text-onSurfaceVariant">{{ jobTime(toolFeedback) }}</p>
           </div>
@@ -128,7 +128,7 @@ const feedbackIcon = computed(() => {
             </template>
             {{ toolFeedbackLogExpanded ? "收起输出" : "展开输出" }}
           </Button>
-          <IconButton variant="standard" size="sm" label="清除反馈" @click="clearToolFeedback">
+          <IconButton variant="standard" size="sm" label="关闭任务卡片" @click="clearToolFeedback">
             <X :size="14" />
           </IconButton>
         </div>
@@ -181,7 +181,7 @@ const feedbackIcon = computed(() => {
         <form class="flex flex-col gap-4" @submit.prevent="runOptimize">
           <header class="flex items-center gap-2">
             <Gauge :size="17" class="text-tertiary" />
-            <h3 class="type-title-md text-onSurface">HY2 同源性能优化</h3>
+            <h3 class="type-title-md text-onSurface">性能优化</h3>
           </header>
           <Select v-model="optimizeAction" label="优化动作">
             <option v-for="action in optimizeActions" :key="action.value" :value="action.value">
@@ -194,12 +194,9 @@ const feedbackIcon = computed(() => {
           >
             <AlertTriangle :size="14" class="shrink-0 mt-0.5" />
             <p class="type-body-sm">
-              该动作会改动系统级内核或网络参数,通常需要重启服务器后完全生效。
+              此操作会修改内核或网络参数，通常需要重启服务器。
             </p>
           </div>
-          <p v-else class="type-body-sm text-onSurfaceVariant">
-            执行入口与 HY2 Python 上游脚本一致,远端 hook 会拉取并运行 Linux-NetSpeed tcpx.sh。
-          </p>
           <Button
             type="submit"
             variant="filled"
@@ -209,7 +206,7 @@ const feedbackIcon = computed(() => {
             <template #leading>
               <Gauge :size="16" />
             </template>
-            执行优化动作
+            执行
           </Button>
         </form>
       </Surface>

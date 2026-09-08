@@ -120,7 +120,7 @@ function openNodePicker() {
         </Button>
       </div>
       <p class="type-body-sm text-onSurfaceVariant mt-3">
-        当前应用节点:<span class="text-onSurface">{{ selectedNodePreview }}</span>。封禁动作通过各服务器的持久化 hook 写入防火墙 DROP 规则,不是 WebUI 访问控制。
+        已选节点：<span class="text-onSurface">{{ selectedNodePreview }}</span>
       </p>
     </Surface>
 
@@ -159,7 +159,6 @@ function openNodePicker() {
         v-if="!activeBlacklistEntries.length"
         :icon="ShieldBan"
         title="还没有黑名单记录"
-        description="封禁或刷新服务器状态后,这里会显示已同步的节点黑名单。"
         compact
       />
       <div v-else class="overflow-x-auto">
@@ -336,7 +335,6 @@ function openNodePicker() {
     <CollapseSection
       v-model="connectionStatsCollapsed"
       :title="`连接统计 (${filteredRemoteTraffic.length} / ${state.remoteTraffic.length} 客户端 · ${filteredConnections.length} / ${state.connections.length} 实时连接)`"
-      description="按客户端 IP 汇总流量,并可查看每条实时连接"
       :default-open="!connectionStatsCollapsed"
     >
       <div class="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 mb-4">
@@ -376,7 +374,7 @@ function openNodePicker() {
         <Switch v-model="connectionStatsGrouped" label="按节点分组" />
       </div>
       <p class="type-body-sm text-onSurfaceVariant mb-4">
-        统计口径:仅统计连接到节点监听端口的客户端入站与回程流量。
+        流量按节点端口的客户端收发数据统计。
       </p>
 
       <!-- Client traffic table -->
@@ -387,7 +385,6 @@ function openNodePicker() {
       <EmptyState
         v-if="!state.remoteTraffic.length"
         title="尚无客户端流量"
-        description="刷新节点状态后,这里会按客户端 IP 统计 RX / TX 流量。"
         compact
       />
       <EmptyState
@@ -462,7 +459,6 @@ function openNodePicker() {
       <EmptyState
         v-if="!state.connections.length"
         title="尚无连接"
-        description="刷新节点状态后,这里会显示可封禁的客户端来源 IP。"
         compact
       />
       <EmptyState

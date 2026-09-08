@@ -27,13 +27,12 @@ function close() {
     :open="manualNodeModalOpen"
     size="lg"
     title="手动添加监控节点"
-    subtitle="只登记已有节点的监听信息,不执行安装、证书申请或配置写入。"
     @close="close"
   >
     <form id="manual-node-form" class="flex flex-col gap-3" @submit.prevent="submitManualNode">
       <div class="grid gap-3 grid-cols-1 sm:grid-cols-2">
         <Select v-model="manualNodeForm.serverId" label="目标服务器" required>
-          <option value="" disabled>选择 hook 已就绪的服务器</option>
+          <option value="" disabled>选择服务器</option>
           <option v-for="server in readyServers" :key="server.id" :value="server.id">
             {{ server.name }}
           </option>
@@ -68,11 +67,9 @@ function close() {
       <TextField
         v-model="manualNodeForm.service"
         label="systemd 服务"
-        placeholder="如 sing-box.service;留空则只能刷新端口连接"
+        placeholder="可选，如 sing-box.service"
+        helper="填写服务名后可重启节点服务。"
       />
-      <p class="type-body-sm text-onSurfaceVariant">
-        自动发现会优先读取 sing-box 配置;只有配置路径不标准、节点不是 sing-box 承载,或需要先手工纳入监控时才需要这里。
-      </p>
     </form>
 
     <template #footer>

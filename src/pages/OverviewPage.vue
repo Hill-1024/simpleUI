@@ -112,7 +112,7 @@ function statusColor(status) {
             {{ fleetHealth.label }}
           </Chip>
           <div>
-            <h2 class="type-headline-lg text-onSurface">SimpleUI Fleet</h2>
+            <h2 class="type-headline-lg text-onSurface">运行概况</h2>
             <p class="type-body-lg text-onSurfaceVariant mt-2 max-w-xl">{{ fleetHealth.summary }}</p>
           </div>
           <div class="flex gap-2 flex-wrap mt-1">
@@ -197,7 +197,6 @@ function statusColor(status) {
           v-if="!overviewServers.length"
           :icon="Server"
           title="尚无运行数据"
-          description="服务器接入并完成 Hook 安装后,资源指标会出现在此。"
           compact
         />
         <div v-else class="flex flex-col gap-3">
@@ -264,7 +263,6 @@ function statusColor(status) {
           v-if="!topTrafficNodes.length"
           :icon="Radio"
           title="无节点流量"
-          description="节点联机后,流量排名会出现在此。"
           compact
         />
         <div v-else class="flex flex-col gap-2.5">
@@ -304,7 +302,6 @@ function statusColor(status) {
           v-if="!topRemoteTraffic.length"
           :icon="Network"
           title="无客户端流量"
-          description="客户端联机后会按来源 IP 排序展示。"
           compact
         />
         <div v-else class="flex flex-col gap-2">
@@ -329,7 +326,6 @@ function statusColor(status) {
     <CollapseSection
       v-if="visibleJobs.length"
       :title="`任务执行情况 (${filteredJobs.length} / ${visibleJobs.length})`"
-      description="近期 Hook 任务,可按类型、状态过滤"
     >
       <template #actions>
         <Button variant="text" size="sm" @click.stop="clearJobs">

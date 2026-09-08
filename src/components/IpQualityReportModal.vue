@@ -1,17 +1,12 @@
 <script setup>
 import { computed } from "vue";
 import { ExternalLink } from "lucide-vue-next";
-import { Modal, Button, Chip } from "./ui";
+import { Modal, Chip } from "./ui";
 import { useAppBindings } from "../composables/useAppBindings.js";
 
 const { ipQualityModal } = useAppBindings();
 
 const isOpen = computed(() => Boolean(ipQualityModal.value));
-const subtitle = computed(() => {
-  if (!ipQualityModal.value) return "";
-  if (ipQualityModal.value.reports) return "IPv4 / IPv6 分别检测完成";
-  return ipQualityModal.value.reportPath || ipQualityModal.value.logPath || "远端报告";
-});
 
 function close() {
   ipQualityModal.value = null;
@@ -23,7 +18,6 @@ function close() {
     :open="isOpen"
     size="xl"
     title="IPQuality 检测报告"
-    :subtitle="subtitle"
     @close="close"
   >
     <div v-if="ipQualityModal?.reports" class="grid gap-3">
@@ -51,7 +45,7 @@ function close() {
         <pre
           v-else
           class="max-h-[40vh] overflow-auto bg-surfaceContainerLowest/80 rounded-xl px-3 py-2 mt-2 font-mono type-body-sm text-onSurface whitespace-pre-wrap"
-        >{{ report.rawOutput || "没有生成在线报告。关闭隐私模式后,IPQuality 会返回 Report.Check.Place 链接。" }}</pre>
+        >{{ report.rawOutput || "暂无检测报告。" }}</pre>
       </article>
     </div>
     <template v-else-if="ipQualityModal">
@@ -79,7 +73,7 @@ function close() {
       <pre
         v-else
         class="max-h-[60vh] overflow-auto bg-surfaceContainerLowest/80 rounded-2xl px-4 py-3 font-mono type-body-sm text-onSurface whitespace-pre-wrap"
-      >{{ ipQualityModal.rawOutput || "没有生成在线报告。关闭隐私模式后,IPQuality 会返回 Report.Check.Place 链接。" }}</pre>
+      >{{ ipQualityModal.rawOutput || "暂无检测报告。" }}</pre>
     </template>
   </Modal>
 </template>

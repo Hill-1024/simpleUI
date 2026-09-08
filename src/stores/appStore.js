@@ -1,4 +1,3 @@
-// Generated from the former App.vue script so the page split preserves behavior.
 import { computed, nextTick, reactive, ref, watch } from "vue";
 import { defineStore } from "pinia";
 import { api, subscribeJob } from "../api.js";
@@ -27,21 +26,21 @@ const loginForm = reactive({ password: "" });
 const passwordForm = reactive({ currentPassword: "", newPassword: "", confirmPassword: "" });
 let refreshTimer = null;
 const pageDefinitions = [
-  { id: "overview", title: "舰队总览", description: "服务器、节点、连接来源与流量态势。" },
-  { id: "servers", title: "服务器管理", description: "添加服务器、安装或升级持久化 Hook，并维护服务器名称、分组与连接信息。" },
-  { id: "deploy", title: "节点部署", description: "在 Hook 已就绪的服务器上部署或重新部署 Hysteria2 / Trojan 节点。" },
-  { id: "nodes", title: "节点管理", description: "查看节点状态、资源同步结果，并把已有 sing-box 主流协议节点纳入监控。" },
-  { id: "connections", title: "连接统计与封禁", description: "按客户端 IP 查看流量，维护节点黑名单，并支持按 IP 或节点分组查看。" },
-  { id: "tools", title: "服务器工具", description: "执行性能优化和 IPQuality 双栈检测等 Hook 侧任务。" },
-  { id: "terminal", title: "服务器终端", description: "通过已安装的持久化 Hook 在目标服务器上执行维护命令。" },
-  { id: "logs", title: "任务日志", description: "查看当前任务的 Hook 输出，以及需要排障时的原始执行日志。" },
-  { id: "about", title: "关于 SimpleUI", description: "项目信息、发布信息与桌面端构建目标。" }
+  { id: "overview", title: "总览", description: "服务器、节点与流量概况。" },
+  { id: "servers", title: "服务器管理", description: "接入服务器，维护连接信息。" },
+  { id: "deploy", title: "节点部署", description: "部署 Hysteria2 / Trojan 节点。" },
+  { id: "nodes", title: "节点管理", description: "查看运行状态，管理节点与监控。" },
+  { id: "connections", title: "连接统计与封禁", description: "查看客户端流量，管理 IP 黑名单。" },
+  { id: "tools", title: "服务器工具", description: "性能优化与 IP 质量检测。" },
+  { id: "terminal", title: "服务器终端", description: "在服务器上执行命令。" },
+  { id: "logs", title: "任务日志", description: "查看任务结果与执行日志。" },
+  { id: "about", title: "关于 SimpleUI", description: "版本信息与登录设置。" }
 ];
 const pageMap = Object.fromEntries(pageDefinitions.map((page) => [page.id, page]));
 const activePage = ref("overview");
 const pageMeta = computed(() => pageMap[activePage.value] || pageMap.overview);
 const projectInfo = {
-  name: "SimpleUI Node Console",
+  name: "SimpleUI",
   version: __APP_VERSION__,
   author: __APP_AUTHOR__,
   homepage: __APP_HOMEPAGE__,
@@ -192,10 +191,10 @@ const taskStatusOptions = [
 ];
 const serverPageTaskTypes = new Set(["hook-install", "hook-upgrade", "server-delete", "server-reboot"]);
 const pageTaskFeedbackConfig = {
-  servers: { title: "服务器任务反馈", types: serverPageTaskTypes },
-  deploy: { title: "部署任务反馈", types: new Set(["deploy", "node-update"]) },
-  nodes: { title: "节点任务反馈", types: new Set(["status", "service", "node-delete"]) },
-  connections: { title: "封禁任务反馈", types: new Set(["ban", "unban", "batch"]) }
+  servers: { title: "服务器任务", types: serverPageTaskTypes },
+  deploy: { title: "部署任务", types: new Set(["deploy", "node-update"]) },
+  nodes: { title: "节点任务", types: new Set(["status", "service", "node-delete"]) },
+  connections: { title: "封禁任务", types: new Set(["ban", "unban", "batch"]) }
 };
 const connectionSortOptions = [
   { value: "total", label: "总流量" },
@@ -733,7 +732,7 @@ function jobSummary(job) {
   const result = job.result;
   if (job.type === "ipquality" && result) {
     if (result.reportUrl) return `在线报告已生成：${result.reportUrl}`;
-    if (result.rawOutput) return "原始报告已返回";
+    if (result.rawOutput) return "检测报告已生成";
     return `报告 ${result.reportPath || "-"}`;
   }
   if (job.type === "optimize" && result && typeof result === "object") {
@@ -756,9 +755,9 @@ function jobSummary(job) {
     if (discovered) return `Hook 已就绪，已检出 ${discovered} 个远端节点`;
     return result?.hookUrl ? `Hook 已就绪：${result.hookUrl}` : "Hook 安装完成";
   }
-  if (job.type === "hook-upgrade") return result?.reachable ? "Hook 在线升级完成" : "Hook 在线升级已返回";
+  if (job.type === "hook-upgrade") return result?.reachable ? "Hook 升级完成" : "Hook 升级任务已完成，请刷新状态";
   if (job.type === "exec" && result && typeof result === "object") return `命令退出码 ${result.exitCode ?? "-"}`;
-  return result ? "已返回结构化结果" : "完成";
+  return "已完成";
 }
 
 function jobKindLabel(type) {
@@ -817,22 +816,22 @@ function openToolReport(report) {
 
 function toolFeedbackSummary(job = toolFeedback.value) {
   if (!job) return "";
-  if (job.status === "running") return "任务正在远端 hook 中执行，完成后这里会更新结果。";
-  if (job.status === "queued") return "任务已加入队列，等待 hook 执行。";
+  if (job.status === "running") return "正在执行";
+  if (job.status === "queued") return "等待执行";
   if (job.status === "failed") return job.error || "执行失败，请展开输出查看原因。";
   const reports = toolFeedbackReports(job);
-  if (reports.length) return `IPQuality 已返回 ${reports.length} 份检测结果，可直接打开报告。`;
+  if (reports.length) return `已生成 ${reports.length} 份检测报告。`;
   return jobSummary(job);
 }
 
 function toolFeedbackLogText(job = toolFeedback.value) {
   const text = (job?.logs || []).join("");
-  return text.trim() ? text : "等待 Hook 输出...";
+  return text.trim() ? text : "等待输出…";
 }
 
 function taskLogText(job) {
   const text = (job?.logs || []).join("");
-  return text.trim() ? text : "等待 Hook 输出...";
+  return text.trim() ? text : "等待输出…";
 }
 
 function taskHasLogs(job) {
@@ -1123,7 +1122,7 @@ async function changeWebPassword() {
       newPassword: passwordForm.newPassword
     });
     Object.assign(passwordForm, { currentPassword: "", newPassword: "", confirmPassword: "" });
-    toast.value = "WebUI 登录密码已更新。";
+    toast.value = "登录密码已更新。";
   } catch (error) {
     showError(error);
   } finally {
@@ -1391,7 +1390,7 @@ function watchJobs(jobs, title, options = {}) {
 }
 
 async function clearJobs() {
-  if (!window.confirm("清空任务执行记录？不会影响服务器、节点或远端 hook。")) return;
+  if (!window.confirm("清空已结束的任务记录？")) return;
   const activeStillRunning = ["queued", "running"].includes(activeJob.value?.status);
   try {
     await api.clearJobs();
@@ -1547,7 +1546,7 @@ async function installServer() {
 }
 
 async function upgradeHook(server) {
-  if (!window.confirm(`通过现有 hook 在线升级 ${server.name}？如果只是 TLS/旧版 HTTP 协议不匹配，面板会尝试自动修复；如果 hook 完全离线，则仍需要通过 SSH 重装。`)) return;
+  if (!window.confirm(`升级 ${server.name} 的 Hook？`)) return;
   busy.value = true;
   try {
     const result = await api.upgradeHook(server.id);
@@ -1559,13 +1558,13 @@ async function upgradeHook(server) {
 }
 
 async function trustHookCertificate(server) {
-  if (!window.confirm(`信任 ${server.name} 当前返回的 Hook TLS 证书？仅当你确认该服务器没有被中间人劫持，或刚刚重装/升级过 hook 时才应继续。`)) return;
+  if (!window.confirm(`信任 ${server.name} 的新 Hook 证书？请先确认该证书来自你的服务器。`)) return;
   busy.value = true;
   try {
     const result = await api.trustHookCertificate(server.id);
     const index = state.servers.findIndex((item) => item.id === server.id);
     if (index >= 0) state.servers[index] = result.server;
-    toast.value = `${server.name} 的 Hook TLS 证书已重新固定。`;
+    toast.value = `已信任 ${server.name} 的新 Hook 证书。`;
   } catch (error) {
     showError(error);
   } finally {
@@ -1574,7 +1573,7 @@ async function trustHookCertificate(server) {
 }
 
 async function deleteServer(server) {
-  if (!window.confirm(`删除 ${server.name} 会先卸载目标服务器上的 SimpleUI hook，并清理 SimpleUI 部署的节点。继续吗？`)) return;
+  if (!window.confirm(`卸载 ${server.name} 上的 Hook 和 SimpleUI 部署的节点，并删除服务器记录？`)) return;
   busy.value = true;
   try {
     const result = await api.deleteServer(server.id);
@@ -1586,7 +1585,7 @@ async function deleteServer(server) {
 }
 
 async function forceClearServer(server) {
-  if (!window.confirm(`强制清除 ${server.name}？该动作只删除本地记录，不会连接目标服务器，也不会清理远端 hook 或节点。`)) return;
+  if (!window.confirm(`移除 ${server.name} 的本地记录？`)) return;
   busy.value = true;
   try {
     await api.forceClearServer(server.id);
@@ -1600,7 +1599,7 @@ async function forceClearServer(server) {
 }
 
 async function rebootServer(server) {
-  if (!window.confirm(`重启服务器 ${server.name}？目标服务器会在任务返回后短暂下线，期间 hook 和节点都可能不可用。继续吗？`)) return;
+  if (!window.confirm(`重启 ${server.name}？重启期间节点将暂时离线。`)) return;
   busy.value = true;
   try {
     const result = await api.rebootServer(server.id);
@@ -1672,7 +1671,7 @@ function openManualNodeModal() {
 
 function startEditNode(node) {
   if (!isDeployableNode(node)) {
-    toast.value = "这个节点是监控登记节点，只能刷新状态或移除监控记录。";
+    toast.value = "监控节点支持刷新状态和移除记录。";
     return;
   }
   editingNodeId.value = node.id;
@@ -1810,7 +1809,7 @@ async function serviceNode(node, action) {
 }
 
 async function deleteNode(node) {
-  if (!window.confirm(`卸载并删除节点 ${node.name}？该动作会清理目标服务器上的 ${node.protocol} 服务和 SimpleUI 管理的配置，但会保留服务器 hook。`)) return;
+  if (!window.confirm(`卸载 ${node.name} 的 ${node.protocol} 服务和 SimpleUI 管理的配置，并删除节点记录？`)) return;
   busy.value = true;
   try {
     const result = await api.deleteNode(node.id);
@@ -1823,8 +1822,8 @@ async function deleteNode(node) {
 
 async function forceClearNode(node) {
   const message = node.monitorOnly
-    ? `移除 ${node.name} 的本地监控记录？该动作不会连接服务器，也不会改动远端服务。`
-    : `强制清除节点 ${node.name}？该动作只删除本地记录，不会连接服务器，也不会清理远端服务。`;
+    ? `移除 ${node.name} 的本地监控记录？`
+    : `移除 ${node.name} 的本地节点记录？`;
   if (!window.confirm(message)) return;
   busy.value = true;
   try {

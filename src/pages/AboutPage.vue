@@ -32,7 +32,7 @@ const {
       <div class="min-w-0 flex-1">
         <h2 class="type-headline-sm text-onSurface">{{ projectInfo.name }}</h2>
         <p class="type-body-md text-onSurfaceVariant mt-1.5 max-w-2xl">
-          多服务器 Hysteria2 / Trojan 节点控制台,面向持久化 Hook、快速部署、连接观测与跨节点封禁。
+          管理多台服务器上的 Hysteria2 / Trojan 节点。
         </p>
       </div>
       <Chip variant="tonal" color="primary" size="md">v{{ projectInfo.version }}</Chip>
@@ -77,7 +77,7 @@ const {
       <Surface variant="panel" radius="2xl" padding="lg" class="flex flex-col gap-4">
         <header class="flex items-center gap-2">
           <PackageCheck :size="18" class="text-primary" />
-          <h3 class="type-title-md text-onSurface">Release 目标</h3>
+          <h3 class="type-title-md text-onSurface">支持平台</h3>
         </header>
         <div class="grid gap-2.5">
           <article
@@ -92,9 +92,6 @@ const {
             <Chip variant="outlined" size="xs">{{ target.packages }}</Chip>
           </article>
         </div>
-        <p class="type-body-sm text-onSurfaceVariant">
-          Release 包命名:SimpleUI_版本_系统平台_硬件架构.扩展名。
-        </p>
       </Surface>
 
       <Surface variant="panel" radius="2xl" padding="lg" class="flex flex-col gap-4">

@@ -51,8 +51,8 @@ function statusColor(status) {
   <Modal
     :open="banNodeModalOpen"
     size="xl"
-    title="选择封禁应用节点"
-    :subtitle="`已选 ${selectedNodes.length} 个节点;封禁会下发到这些节点所在服务器的 hook。`"
+    title="选择封禁节点"
+    :subtitle="`已选 ${selectedNodes.length} 个节点`"
     @close="banNodeModalOpen = false"
   >
     <div class="flex flex-col gap-4">
@@ -75,13 +75,11 @@ function statusColor(status) {
         v-if="!state.nodes.length"
         :icon="Radio"
         title="尚无节点"
-        description="还没有节点可以选择。"
         compact
       />
       <EmptyState
         v-else-if="!filteredBanNodes.length"
         title="无匹配结果"
-        description="没有符合当前筛选条件的节点。"
         compact
       />
       <div v-else class="rounded-2xl border border-outlineVariant/30 overflow-hidden max-h-[55vh] overflow-y-auto">

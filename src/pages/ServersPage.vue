@@ -89,7 +89,7 @@ function statusColor(status) {
       >
         <AlertTriangle :size="16" class="shrink-0 mt-0.5" />
         <p class="type-body-sm">
-          正在通过 SSH 重装 <strong>{{ serverForm.name }}</strong> 的持久化 hook;只有首次接入、hook 离线或旧 hook 不支持在线升级时才需要这条路径。
+          重装 <strong>{{ serverForm.name }}</strong> 的 Hook，请填写 SSH 登录信息。
         </p>
       </div>
 
@@ -104,15 +104,12 @@ function statusColor(status) {
           <TextField v-model.number="serverForm.hookPort" label="Hook 端口" type="number" inputmode="numeric" />
           <TextField v-model="serverForm.location" label="地区" placeholder="可选" />
         </div>
-        <p class="type-body-sm text-onSurfaceVariant">
-          SSH 凭据只用于 bootstrap 或离线恢复;hook 在线后可直接在服务器列表中执行在线升级。
-        </p>
         <div class="flex gap-2 flex-wrap">
           <Button type="submit" variant="filled" :loading="busy">
             <template #leading>
               <ShieldCheck :size="16" />
             </template>
-            {{ isEditing ? "通过 SSH 重装 hook" : "添加服务器并安装 hook" }}
+            {{ isEditing ? "通过 SSH 重装 Hook" : "添加服务器并安装 Hook" }}
           </Button>
           <Button v-if="isEditing" type="button" variant="text" :disabled="busy" @click="resetServerForm">
             <template #leading>
@@ -139,7 +136,6 @@ function statusColor(status) {
         v-if="!state.servers.length"
         :icon="Server"
         title="还没有服务器"
-        description="使用上方表单添加服务器,并等待 Hook 安装完成。"
       />
       <div v-else class="overflow-x-auto -mx-2">
         <table class="w-full border-separate border-spacing-0">
@@ -280,13 +276,13 @@ function statusColor(status) {
                       </IconButton>
                     </template>
                     <template v-else>
-                      <IconButton variant="standard" size="sm" label="在线升级 hook" :disabled="busy || !row.server.hookUrl || row.server.hookStatus === 'deleting'" @click="upgradeHook(row.server)">
+                      <IconButton variant="standard" size="sm" label="升级 Hook" :disabled="busy || !row.server.hookUrl || row.server.hookStatus === 'deleting'" @click="upgradeHook(row.server)">
                         <ShieldCheck :size="14" />
                       </IconButton>
                       <IconButton variant="standard" size="sm" label="信任 Hook 证书" :disabled="busy || !row.server.hookSecurity?.mismatch" @click="trustHookCertificate(row.server)">
                         <SearchCheck :size="14" />
                       </IconButton>
-                      <IconButton variant="standard" size="sm" label="通过 SSH 重装 hook" :disabled="busy" @click="prepareHookUpgrade(row.server)">
+                      <IconButton variant="standard" size="sm" label="通过 SSH 重装 Hook" :disabled="busy" @click="prepareHookUpgrade(row.server)">
                         <RefreshCcw :size="14" />
                       </IconButton>
                       <IconButton variant="standard" size="sm" label="编辑" :disabled="busy" @click="startEditServer(row.server)">
@@ -295,7 +291,7 @@ function statusColor(status) {
                       <IconButton variant="warning" size="sm" label="重启服务器" :disabled="busy || row.server.hookStatus !== 'online'" @click="rebootServer(row.server)">
                         <RotateCw :size="14" />
                       </IconButton>
-                      <IconButton variant="danger" size="sm" label="卸载 hook 并删除" :disabled="busy || row.server.hookStatus === 'deleting'" @click="deleteServer(row.server)">
+                      <IconButton variant="danger" size="sm" label="卸载 Hook 并删除" :disabled="busy || row.server.hookStatus === 'deleting'" @click="deleteServer(row.server)">
                         <Trash2 :size="14" />
                       </IconButton>
                       <IconButton variant="danger" size="sm" label="强制清除本地记录" :disabled="busy" @click="forceClearServer(row.server)">
