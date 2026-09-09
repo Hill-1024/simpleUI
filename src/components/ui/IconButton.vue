@@ -14,34 +14,36 @@ const props = defineProps({
 defineEmits(["click"]);
 
 const sizeMap = {
-  sm: "h-7 w-7",
-  md: "h-9 w-9",
+  sm: "h-8 w-8",
+  md: "h-9.5 w-9.5",
   lg: "h-11 w-11"
 };
 
 const iconSize = computed(() => {
   if (props.size === "sm") return 14;
-  if (props.size === "lg") return 20;
+  if (props.size === "lg") return 19;
   return 16;
 });
 
 const variantMap = {
-  standard: "text-onSurfaceVariant hover:text-onSurface",
+  standard:
+    "text-onSurfaceVariant hover:text-onSurface hover:bg-[rgb(var(--md-surface-container-high))]",
   tonal:
-    "bg-surfaceContainerHigh text-onSurfaceVariant hover:text-onSurface specular-edge",
+    "bg-[rgb(var(--md-surface-container-high))] text-onSurfaceVariant hover:text-onSurface specular-ring",
   filled:
-    "bg-primary text-onPrimary shadow-elev-1 specular-edge",
+    "bg-primary text-onPrimary shadow-elev-1 specular-ring",
   outlined:
-    "border border-outline text-onSurfaceVariant hover:text-onSurface",
+    "border border-[rgb(var(--md-outline-variant)/0.8)] text-onSurfaceVariant hover:text-onSurface",
   danger:
-    "text-error hover:bg-error/8",
+    "text-error hover:bg-error/10",
   "danger-tonal":
-    "bg-errorContainer text-onErrorContainer specular-edge",
-  warning: "text-warning hover:bg-warning/8"
+    "bg-errorContainer text-onErrorContainer specular-ring",
+  warning:
+    "text-warning hover:bg-warning/10"
 };
 
 const cls = computed(() => [
-  "state-layer inline-flex items-center justify-center rounded-full transition-all duration-200 ease-standard focus-ring",
+  "state-layer press inline-flex items-center justify-center rounded-full transition-all duration-250 ease-out-soft focus-ring",
   sizeMap[props.size] || sizeMap.md,
   variantMap[props.variant] || variantMap.standard,
   (props.disabled || props.loading) ? "pointer-events-none opacity-40" : ""
@@ -53,6 +55,7 @@ const cls = computed(() => [
     :class="cls"
     :type="type"
     :aria-label="label || undefined"
+    :title="label || undefined"
     :aria-disabled="disabled || loading"
     :disabled="disabled || loading"
     @click="$emit('click', $event)"

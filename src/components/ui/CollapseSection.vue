@@ -27,12 +27,9 @@ function toggle() {
 </script>
 
 <template>
-  <section class="glass-panel specular-edge rounded-2xl">
+  <section class="glass-panel rounded-2xl">
     <header
-      :class="[
-        'state-layer flex items-center justify-between gap-3 px-5 py-4 cursor-pointer rounded-2xl select-none',
-        internal ? 'rounded-b-none' : ''
-      ]"
+      class="state-layer flex items-center justify-between gap-3 px-5 py-4 cursor-pointer select-none"
       @click="toggle"
     >
       <div class="min-w-0 flex-1">
@@ -42,23 +39,25 @@ function toggle() {
       </div>
       <div class="flex items-center gap-2">
         <slot name="actions" />
-        <ChevronDown
-          :size="18"
-          :class="['text-onSurfaceVariant transition-transform duration-300 ease-emphasized', internal ? 'rotate-180' : '']"
-        />
+        <span class="grid place-items-center h-8 w-8 rounded-full bg-[rgb(var(--md-surface-container-high)/0.6)] text-onSurfaceVariant">
+          <ChevronDown
+            :size="16"
+            :class="['transition-transform duration-350 ease-signature', internal ? 'rotate-180' : '']"
+          />
+        </span>
       </div>
     </header>
     <transition
-      enter-active-class="transition-all duration-300 ease-emphasized-decel"
+      enter-active-class="transition-all duration-400 ease-out-soft"
       enter-from-class="max-h-0 opacity-0"
       enter-to-class="max-h-[2000px] opacity-100"
-      leave-active-class="transition-all duration-200 ease-emphasized-accel"
+      leave-active-class="transition-all duration-250 ease-emphasized-accel"
       leave-from-class="max-h-[2000px] opacity-100"
       leave-to-class="max-h-0 opacity-0"
     >
       <div
         v-show="internal"
-        :class="['overflow-hidden border-t border-outlineVariant/40', noPad ? '' : 'px-5 py-5']"
+        :class="['overflow-hidden border-t border-[rgb(var(--md-outline-variant)/0.45)] dark:border-white/5', noPad ? '' : 'px-5 py-5']"
       >
         <slot />
       </div>

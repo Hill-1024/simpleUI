@@ -56,14 +56,17 @@ function statusIconClass(status) {
 <template>
   <Surface
     v-if="visible"
+    v-reveal
     variant="elevated"
     radius="2xl"
     padding="md"
-    class="flex flex-col gap-3 motion-slide-up"
+    class="flex flex-col gap-3.5 motion-slide-up"
   >
     <header class="flex items-center justify-between gap-2">
-      <div class="flex items-center gap-2 min-w-0">
-        <Terminal :size="16" class="text-primary shrink-0" />
+      <div class="flex items-center gap-2.5 min-w-0">
+        <span class="grid place-items-center h-8 w-8 rounded-[10px] bg-primary/10 text-primary shrink-0">
+          <Terminal :size="15" />
+        </span>
         <h3 class="type-title-md text-onSurface break-words">{{ activePageTaskFeedback.title }}</h3>
       </div>
       <div class="flex items-center gap-2 shrink-0">
@@ -76,22 +79,22 @@ function statusIconClass(status) {
       </div>
     </header>
 
-    <div class="flex flex-col gap-2.5">
+    <div class="flex flex-col divide-y divide-[rgb(var(--md-outline-variant)/0.4)] dark:divide-white/5">
       <article
         v-for="job in activePageTaskCards"
         :key="job.id"
-        class="rounded-2xl bg-surfaceContainerLow/60 border border-outlineVariant/30 px-4 py-3"
+        class="py-3 first:pt-0 last:pb-0"
       >
         <div class="flex items-start justify-between gap-2 mb-1.5">
           <div class="flex items-start gap-2.5 min-w-0">
             <component
               :is="statusIcon(job.status)"
-              :size="16"
+              :size="15"
               :class="['shrink-0 mt-0.5', statusIconClass(job.status)]"
             />
             <div class="min-w-0">
               <p class="type-title-sm text-onSurface break-words">{{ job.title }}</p>
-              <p class="type-body-sm text-onSurfaceVariant break-words">
+              <p class="type-body-sm text-onSurfaceVariant break-words tabular-nums">
                 {{ jobKindLabel(job.type) }} · {{ jobTime(job) }}
               </p>
             </div>
@@ -105,16 +108,16 @@ function statusIconClass(status) {
         </p>
         <details
           v-if="taskHasLogs(job)"
-          class="mt-2 group"
+          class="mt-2.5 group"
           :open="['running', 'failed'].includes(job.status)"
         >
-          <summary class="cursor-pointer type-label-md text-primary list-none flex items-center gap-1.5 select-none">
+          <summary class="cursor-pointer type-label-md text-primary list-none flex items-center gap-1.5 select-none w-fit">
             <ScrollText :size="13" />
             执行日志
           </summary>
-          <pre
-            class="mt-2 max-h-[260px] overflow-auto rounded-xl bg-surfaceContainerLowest/80 border border-outlineVariant/30 px-3 py-2 font-mono type-body-sm whitespace-pre-wrap"
-          >{{ taskLogText(job) }}</pre>
+          <div class="mt-2 rounded-[0.9rem] p-1 bg-[rgb(var(--md-surface-container-high)/0.5)] border border-[rgb(var(--md-outline-variant)/0.5)] dark:border-white/8">
+            <pre class="console-surface max-h-[260px] overflow-auto rounded-[0.65rem] px-3 py-2 font-mono type-body-sm whitespace-pre-wrap">{{ taskLogText(job) }}</pre>
+          </div>
         </details>
       </article>
     </div>

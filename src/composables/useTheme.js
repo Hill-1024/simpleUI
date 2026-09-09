@@ -29,8 +29,10 @@ function resolveTheme(pref) {
 function apply(theme) {
   if (typeof document === "undefined") return;
   document.documentElement.setAttribute("data-theme", theme);
+  // UnoCSS `dark:` variants match the .dark class; keep it in sync with data-theme.
+  document.documentElement.classList.toggle("dark", theme === "dark");
   const meta = document.querySelector('meta[name="theme-color"]');
-  const color = theme === "dark" ? "#0E1513" : "#F4FBF8";
+  const color = theme === "dark" ? "#080C0B" : "#F2F4F3";
   if (meta) {
     meta.setAttribute("content", color);
   } else {

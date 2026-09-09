@@ -5,3 +5,6 @@ data/state.sqlite*
 data/archive/*.json
 *.log
 .DS_Store
+
+# local security-scan artifacts
+.mimosa/

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, toRef, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, toRef, watch } from "vue";
 import { RouterLink, RouterView, useRoute } from "vue-router";
 import {
   LayoutDashboard,
@@ -14,21 +14,14 @@ import {
   Loader2,
   RefreshCw,
   LogOut,
-  ShieldCheck,
-  ChevronRight
+  X
 } from "lucide-vue-next";
 import BanNodeModal from "./components/BanNodeModal.vue";
 import IpQualityReportModal from "./components/IpQualityReportModal.vue";
 import ManualNodeModal from "./components/ManualNodeModal.vue";
 import PageTaskPanel from "./components/PageTaskPanel.vue";
 import { useAppStore } from "./stores/appStore.js";
-import {
-  Button,
-  IconButton,
-  TextField,
-  ThemeToggle,
-  Toast
-} from "./components/ui";
+import { Button, TextField, ThemeToggle, Toast } from "./components/ui";
 
 const appStore = useAppStore();
 const route = useRoute();
@@ -41,10 +34,14 @@ const activePage = toRef(appStore, "activePage");
 const toast = toRef(appStore, "toast");
 const { login, logout, syncNow } = appStore;
 const appVersion = __APP_VERSION__;
+const mobileMenuOpen = ref(false);
 
 watch(
   () => route.name,
-  (name) => appStore.setActivePage(typeof name === "string" ? name : "overview"),
+  (name) => {
+    appStore.setActivePage(typeof name === "string" ? name : "overview");
+    mobileMenuOpen.value = false;
+  },
   { immediate: true }
 );
 
@@ -71,157 +68,324 @@ function dismissToast() {
 </script>
 
 <template>
-  <!-- Auth: loading -->
-  <div v-if="!auth.checked" class="min-h-screen grid place-items-center p-6">
-    <section class="glass-elevated specular-edge rounded-3xl px-10 py-12 motion-scale-in flex flex-col items-center gap-5 w-[min(420px,100%)]">
-      <div class="grid place-items-center h-14 w-14 rounded-2xl bg-primary text-onPrimary type-headline-md specular-edge">S</div>
-      <h1 class="type-headline-md text-onSurface">SimpleUI</h1>
-      <p class="type-body-md text-onSurfaceVariant flex items-center gap-2">
-        <Loader2 :size="14" class="spin" /> 正在检查登录状态...
-      </p>
-    </section>
-  </div>
+  <div class="min-h-[100dvh]">
+    <div class="grain-overlay" aria-hidden="true" />
 
-  <!-- Auth: login -->
-  <div v-else-if="!auth.authenticated" class="min-h-screen grid place-items-center p-6">
-    <form
-      class="glass-elevated specular-edge rounded-3xl px-8 py-10 motion-scale-in flex flex-col gap-6 w-[min(440px,100%)]"
-      @submit.prevent="login"
-    >
-      <div class="flex items-center gap-3">
-        <div class="grid place-items-center h-12 w-12 rounded-2xl bg-primary text-onPrimary type-headline-sm specular-edge">S</div>
-        <div>
-          <h1 class="type-headline-sm text-onSurface">SimpleUI</h1>
-          <p class="type-body-sm text-onSurfaceVariant">节点管理</p>
-        </div>
-      </div>
-      <p class="type-body-md text-onSurfaceVariant">
-        首次登录请使用启动终端中显示的初始密码。
-      </p>
-      <TextField
-        v-model="loginForm.password"
-        label="登录密码"
-        type="password"
-        autocomplete="current-password"
-        autofocus
-        required
-      />
-      <Button
-        variant="filled"
-        :loading="authBusy"
-        :disabled="!loginForm.password"
-        type="submit"
-        size="lg"
-        block
-      >
-        <template #leading>
-          <ShieldCheck :size="18" />
-        </template>
-        登录控制台
-      </Button>
-      <div class="flex justify-end">
-        <ThemeToggle />
-      </div>
-    </form>
-  </div>
-
-  <!-- App shell -->
-  <div v-else class="min-h-screen grid grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)]">
-    <!-- Navigation Drawer -->
-    <aside class="lg:sticky top-0 lg:h-screen px-3 py-3 lg:px-4 lg:py-5 flex flex-col gap-4 z-20">
-      <div class="glass-rail specular-edge rounded-3xl lg:flex-1 flex flex-col gap-3 px-3 py-4 lg:py-5 overflow-visible">
-        <div class="px-3 flex items-center gap-3">
-          <div class="grid place-items-center h-10 w-10 rounded-2xl bg-primary text-onPrimary type-title-md specular-edge">S</div>
-          <div class="min-w-0">
-            <p class="type-title-md text-onSurface break-words">SimpleUI</p>
-            <p class="type-body-sm text-onSurfaceVariant break-words">节点管理</p>
+    <!-- Auth: loading -->
+    <div v-if="!auth.checked" class="min-h-[100dvh] grid place-items-center p-6">
+      <div class="flex flex-col items-center gap-6 motion-scale-in">
+        <div class="relative">
+          <div class="absolute inset-0 rounded-[1.4rem] bg-primary/30 blur-xl" aria-hidden="true" />
+          <div class="relative grid place-items-center h-14 w-14 rounded-[1.4rem] bg-gradient-to-b from-primary to-[rgb(var(--md-on-primary-container))] text-onPrimary text-xl font-bold specular-ring shadow-elev-3">
+            S
           </div>
         </div>
+        <p class="type-body-md text-onSurfaceVariant flex items-center gap-2">
+          <Loader2 :size="14" class="spin" /> 正在检查登录状态...
+        </p>
+      </div>
+    </div>
 
-        <nav class="app-nav mt-1 -mx-1.5 px-1.5 py-1.5 lg:flex-1 lg:overflow-y-auto lg:pr-2.5 flex flex-row lg:flex-col gap-1 lg:gap-0.5 overflow-x-auto" aria-label="Primary">
-          <RouterLink
-            v-for="item in navItems"
-            :key="item.name"
-            :to="{ name: item.name }"
-            class="state-layer group relative flex items-center gap-2 lg:gap-3 rounded-2xl px-3 py-2.5 transition-colors duration-200 ease-standard focus-ring shrink-0 lg:shrink"
-            :class="
-              activePage === item.name
-                ? 'bg-secondaryContainer text-onSecondaryContainer'
-                : 'text-onSurfaceVariant hover:text-onSurface'
-            "
+    <!-- Auth: login -->
+    <div v-else-if="!auth.authenticated" class="min-h-[100dvh] grid place-items-center p-5">
+      <!-- Double-bezel login card -->
+      <form
+        class="w-[min(430px,100%)] rounded-[2.1rem] p-2 bg-[rgb(var(--md-surface-container-high)/0.5)] border border-[rgb(var(--md-outline-variant)/0.7)] dark:border-white/8 shadow-elev-4 motion-scale-in"
+        @submit.prevent="login"
+      >
+        <div class="rounded-[1.75rem] bg-[rgb(var(--md-surface-container-lowest)/0.92)] dark:bg-[rgb(var(--md-surface-container-low)/0.9)] border border-[rgb(var(--md-outline-variant)/0.5)] dark:border-white/6 px-7 py-9 flex flex-col gap-7">
+          <div class="flex flex-col items-center text-center gap-4">
+            <div class="relative">
+              <div class="absolute inset-0 rounded-[1.3rem] bg-primary/30 blur-lg" aria-hidden="true" />
+              <div class="relative grid place-items-center h-13 w-13 rounded-[1.3rem] bg-gradient-to-b from-primary to-[rgb(var(--md-on-primary-container))] text-onPrimary text-lg font-bold specular-ring shadow-elev-2">
+                S
+              </div>
+            </div>
+            <div>
+              <h1 class="type-title-lg text-onSurface">SimpleUI</h1>
+              <p class="type-eyebrow text-onSurfaceVariant mt-1.5">Node Console</p>
+            </div>
+          </div>
+          <TextField
+            v-model="loginForm.password"
+            label="登录密码"
+            type="password"
+            autocomplete="current-password"
+            autofocus
+            required
+          />
+          <Button
+            variant="filled"
+            :loading="authBusy"
+            :disabled="!loginForm.password"
+            type="submit"
+            size="lg"
+            block
           >
-            <span class="relative grid place-items-center h-9 w-9 rounded-xl shrink-0">
-              <component :is="item.icon" :size="18" />
+            登录控制台
+          </Button>
+          <div class="flex items-center justify-between pt-1">
+            <p class="type-body-sm text-onSurfaceVariant">首次登录使用终端显示的初始密码</p>
+            <ThemeToggle />
+          </div>
+        </div>
+      </form>
+    </div>
+
+    <!-- App shell -->
+    <div v-else class="min-h-[100dvh] grid grid-cols-1 lg:grid-cols-[232px_minmax(0,1fr)]">
+      <!-- Floating navigation rail (desktop only; mobile uses the top island bar) -->
+      <aside class="hidden lg:flex lg:sticky lg:top-0 lg:h-[100dvh] lg:py-4 lg:pl-4 flex-col z-30">
+        <div class="glass-rail rounded-[1.75rem] lg:h-full flex flex-col gap-2 p-2.5 lg:overflow-hidden">
+          <!-- Brand -->
+          <div class="flex items-center gap-3 px-2.5 pt-2 pb-3">
+            <div class="relative shrink-0">
+              <div class="absolute inset-0 rounded-[0.95rem] bg-primary/25 blur-md" aria-hidden="true" />
+              <div class="relative grid place-items-center h-9.5 w-9.5 rounded-[0.95rem] bg-gradient-to-b from-primary to-[rgb(var(--md-on-primary-container))] text-onPrimary text-sm font-bold specular-ring shadow-elev-1">
+                S
+              </div>
+            </div>
+            <div class="min-w-0 hidden sm:block">
+              <p class="type-title-sm text-onSurface leading-tight">SimpleUI</p>
+              <p class="type-eyebrow text-onSurfaceVariant mt-0.5">Node Console</p>
+            </div>
+            <!-- Hamburger (mobile) -->
+            <button
+              type="button"
+              class="lg:hidden ml-auto relative h-10 w-10 rounded-full state-layer text-onSurface grid place-items-center focus-ring"
+              :aria-expanded="mobileMenuOpen"
+              aria-label="导航菜单"
+              @click="mobileMenuOpen = !mobileMenuOpen"
+            >
+              <span class="relative block w-4.5 h-3">
+                <span
+                  class="absolute left-0 top-0 h-[1.8px] w-full rounded-full bg-current transition-all duration-300 ease-signature"
+                  :class="mobileMenuOpen ? 'top-1/2 -translate-y-1/2 rotate-45' : ''"
+                />
+                <span
+                  class="absolute left-0 bottom-0 h-[1.8px] w-full rounded-full bg-current transition-all duration-300 ease-signature"
+                  :class="mobileMenuOpen ? 'bottom-1/2 translate-y-1/2 -rotate-45' : ''"
+                />
+              </span>
+            </button>
+          </div>
+
+          <!-- Nav -->
+          <nav
+            class="app-nav hidden lg:flex flex-1 flex-col gap-0.5 overflow-y-auto px-1 py-1"
+            aria-label="Primary"
+          >
+            <RouterLink
+              v-for="item in navItems"
+              :key="item.name"
+              :to="{ name: item.name }"
+              :title="item.hint"
+              class="press group relative flex items-center gap-3 rounded-2xl px-2.5 py-2 transition-colors duration-250 ease-out-soft focus-ring"
+              :class="
+                activePage === item.name
+                  ? 'bg-[rgb(var(--md-surface-container-high))] text-onSurface shadow-elev-1'
+                  : 'text-onSurfaceVariant hover:text-onSurface'
+              "
+            >
               <span
                 v-if="activePage === item.name"
-                class="absolute -left-3 top-1/2 -translate-y-1/2 h-5 w-1 rounded-full bg-primary"
+                class="absolute -left-1 top-1/2 -translate-y-1/2 h-4.5 w-[3px] rounded-full bg-primary"
+                aria-hidden="true"
               />
-            </span>
-            <div class="min-w-0 flex-1 flex flex-col">
-              <span class="type-label-lg leading-tight">{{ item.label }}</span>
-              <span class="type-body-sm leading-tight opacity-70 hidden sm:block">{{ item.hint }}</span>
+              <span
+                class="grid place-items-center h-8 w-8 rounded-[10px] transition-colors duration-250 ease-out-soft"
+                :class="
+                  activePage === item.name
+                    ? 'bg-primary text-onPrimary specular-ring'
+                    : 'bg-[rgb(var(--md-surface-container-high)/0.55)] text-onSurfaceVariant group-hover:text-onSurface'
+                "
+              >
+                <component :is="item.icon" :size="16" />
+              </span>
+              <span class="type-label-lg">{{ item.label }}</span>
+            </RouterLink>
+          </nav>
+
+          <!-- Utility tray: nested inset -->
+          <div class="hidden lg:block mx-1 mb-1 rounded-2xl bg-[rgb(var(--md-surface-container-high)/0.45)] border border-[rgb(var(--md-outline-variant)/0.5)] dark:border-white/5 p-2 flex items-center justify-between">
+            <ThemeToggle />
+            <div class="flex items-center gap-1.5">
+              <span class="type-label-sm text-onSurfaceVariant tabular-nums">v{{ appVersion }}</span>
+              <button
+                type="button"
+                class="state-layer press h-8.5 w-8.5 p-2 inline-flex items-center justify-center rounded-full text-onSurfaceVariant hover:text-error transition-colors duration-250 ease-out-soft focus-ring"
+                :disabled="authBusy"
+                aria-label="退出登录"
+                title="退出登录"
+                @click="logout"
+              >
+                <Loader2 v-if="authBusy" :size="15" class="spin" />
+                <LogOut v-else :size="15" />
+              </button>
             </div>
-          </RouterLink>
-        </nav>
-
-        <div class="mt-2 mx-1 lg:mx-2 px-3 py-3 rounded-2xl bg-surfaceContainerHigh/40 backdrop-blur-md border border-outlineVariant/30 flex items-center gap-2.5">
-          <ThemeToggle />
-          <IconButton variant="standard" size="md" label="退出" @click="logout" :loading="authBusy">
-            <LogOut :size="16" />
-          </IconButton>
-          <div class="ml-auto type-body-sm text-onSurfaceVariant">v{{ appVersion }}</div>
-        </div>
-      </div>
-    </aside>
-
-    <!-- Main column -->
-    <main class="min-w-0 flex flex-col px-3 sm:px-6 py-4 sm:py-5 gap-5">
-      <header class="glass-panel specular-edge rounded-3xl px-4 sm:px-6 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div class="min-w-0">
-          <div class="flex items-center gap-1.5 type-label-md text-onSurfaceVariant mb-1">
-            <span>SimpleUI</span>
-            <ChevronRight :size="13" />
-            <span class="text-onSurface">{{ pageMeta.title }}</span>
           </div>
-          <h1 class="type-title-lg text-onSurface break-words">{{ pageMeta.title }}</h1>
-          <p class="type-body-sm text-onSurfaceVariant mt-0.5 max-w-2xl break-words">
-            {{ pageMeta.description }}
-          </p>
         </div>
-        <div class="flex items-center gap-2 shrink-0">
-          <Button
-            variant="tonal"
-            size="md"
-            :loading="loading"
-            @click="syncNow"
-          >
-            <template #leading>
-              <RefreshCw :size="15" />
-            </template>
-            同步
-          </Button>
+      </aside>
+
+      <!-- Main column -->
+      <main class="min-w-0 flex flex-col px-4 sm:px-6 lg:px-6 pb-10 lg:pb-14 gap-7 max-w-[1560px] w-full mx-auto">
+        <!-- Mobile top bar -->
+        <header class="lg:hidden sticky top-3 z-30 mt-3">
+          <div class="glass-rail rounded-full pl-3 pr-1.5 py-1.5 flex items-center gap-2.5">
+            <div class="grid place-items-center h-8 w-8 rounded-xl bg-gradient-to-b from-primary to-[rgb(var(--md-on-primary-container))] text-onPrimary text-xs font-bold specular-ring">
+              S
+            </div>
+            <span class="type-title-sm text-onSurface">SimpleUI</span>
+            <span class="type-label-md text-onSurfaceVariant ml-auto mr-1">{{ pageMeta.title }}</span>
+            <button
+              type="button"
+              class="relative h-9.5 w-9.5 rounded-full state-layer text-onSurface grid place-items-center focus-ring"
+              :aria-expanded="mobileMenuOpen"
+              aria-label="导航菜单"
+              @click="mobileMenuOpen = !mobileMenuOpen"
+            >
+              <span class="relative block w-4.5 h-3">
+                <span
+                  class="absolute left-0 top-0 h-[1.8px] w-full rounded-full bg-current transition-all duration-300 ease-signature"
+                  :class="mobileMenuOpen ? 'top-1/2 -translate-y-1/2 rotate-45' : ''"
+                />
+                <span
+                  class="absolute left-0 bottom-0 h-[1.8px] w-full rounded-full bg-current transition-all duration-300 ease-signature"
+                  :class="mobileMenuOpen ? 'bottom-1/2 translate-y-1/2 -rotate-45' : ''"
+                />
+              </span>
+            </button>
+          </div>
+        </header>
+
+        <!-- Desktop masthead -->
+        <header class="hidden lg:flex items-end justify-between gap-6 pt-9 flex-wrap">
+          <div class="min-w-0">
+            <div class="type-eyebrow text-onSurfaceVariant/80 mb-2 flex items-center gap-2">
+              <span>SimpleUI</span>
+              <span class="inline-block h-2.5 w-px bg-[rgb(var(--md-outline-variant))]" aria-hidden="true" />
+              <span class="text-primary">{{ pageMeta.title }}</span>
+            </div>
+            <h1 class="type-headline-lg text-onSurface break-words">{{ pageMeta.title }}</h1>
+            <p class="type-body-md text-onSurfaceVariant mt-1.5 max-w-2xl break-words">
+              {{ pageMeta.description }}
+            </p>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <Button
+              variant="soft"
+              size="md"
+              :loading="loading"
+              @click="syncNow"
+            >
+              <template #leading>
+                <RefreshCw :size="15" />
+              </template>
+              同步数据
+            </Button>
+          </div>
+        </header>
+
+        <IpQualityReportModal />
+        <BanNodeModal />
+        <ManualNodeModal />
+        <PageTaskPanel />
+
+        <div class="flex-1 min-w-0">
+          <RouterView v-slot="{ Component, route: r }">
+            <!-- Explicit timers, not transitionend: a viewport resize during the
+                 swap must never freeze the outgoing page. -->
+            <Transition
+              mode="out-in"
+              :duration="{ enter: 340, leave: 150 }"
+              enter-active-class="transition-all duration-400 ease-out-soft"
+              enter-from-class="opacity-0 translate-y-3"
+              leave-active-class="transition-all duration-180 ease-emphasized-accel"
+              leave-to-class="opacity-0 -translate-y-1.5"
+            >
+              <component :is="Component" :key="r.fullPath" />
+            </Transition>
+          </RouterView>
         </div>
-      </header>
+      </main>
+    </div>
 
-      <IpQualityReportModal />
-      <BanNodeModal />
-      <ManualNodeModal />
-      <PageTaskPanel />
+    <!-- Mobile full-screen nav overlay -->
+    <Teleport to="body">
+      <Transition
+        enter-active-class="transition-opacity duration-300 ease-out-soft"
+        enter-from-class="opacity-0"
+        leave-active-class="transition-opacity duration-250 ease-emphasized-accel"
+        leave-to-class="opacity-0"
+      >
+        <div
+          v-if="mobileMenuOpen && auth.authenticated"
+          class="lg:hidden fixed inset-0 z-50 flex flex-col bg-[rgb(var(--md-surface)/0.86)] dark:bg-[rgb(var(--md-surface)/0.9)] backdrop-blur-2xl"
+          role="dialog"
+          aria-modal="true"
+          aria-label="导航"
+        >
+          <div class="flex items-center justify-between px-6 pt-7">
+            <div class="flex items-center gap-3">
+              <div class="grid place-items-center h-9.5 w-9.5 rounded-[0.95rem] bg-gradient-to-b from-primary to-[rgb(var(--md-on-primary-container))] text-onPrimary text-sm font-bold specular-ring">
+                S
+              </div>
+              <div>
+                <p class="type-title-sm text-onSurface">SimpleUI</p>
+                <p class="type-eyebrow text-onSurfaceVariant">Node Console</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              class="h-11 w-11 rounded-full state-layer text-onSurface grid place-items-center focus-ring"
+              aria-label="关闭菜单"
+              @click="mobileMenuOpen = false"
+            >
+              <X :size="20" />
+            </button>
+          </div>
 
-      <div class="flex-1 min-w-0">
-        <RouterView v-slot="{ Component, route: r }">
-          <Transition
-            mode="out-in"
-            enter-active-class="transition-all duration-300 ease-emphasized-decel"
-            enter-from-class="opacity-0 translate-y-2"
-            leave-active-class="transition-all duration-150 ease-emphasized-accel"
-            leave-to-class="opacity-0 -translate-y-1"
-          >
-            <component :is="Component" :key="r.fullPath" />
-          </Transition>
-        </RouterView>
-      </div>
-    </main>
+          <nav class="flex-1 overflow-y-auto px-8 pt-10 pb-8 flex flex-col gap-1" aria-label="Mobile">
+            <RouterLink
+              v-for="(item, i) in navItems"
+              :key="item.name"
+              :to="{ name: item.name }"
+              class="press group flex items-center gap-4 rounded-2xl px-4 py-3.5 transition-all duration-500 ease-out-soft"
+              :class="[
+                activePage === item.name
+                  ? 'bg-[rgb(var(--md-surface-container-high))] text-onSurface'
+                  : 'text-onSurfaceVariant',
+                mobileMenuOpen ? 'translate-y-0 opacity-100' : 'translate-y-5 opacity-0'
+              ]"
+              :style="{ transitionDelay: mobileMenuOpen ? `${90 + i * 45}ms` : '0ms' }"
+            >
+              <span
+                class="grid place-items-center h-10 w-10 rounded-xl"
+                :class="activePage === item.name ? 'bg-primary text-onPrimary specular-ring' : 'bg-[rgb(var(--md-surface-container-high))] text-onSurfaceVariant'"
+              >
+                <component :is="item.icon" :size="18" />
+              </span>
+              <span class="type-title-md">{{ item.label }}</span>
+              <span class="type-body-sm text-onSurfaceVariant/70 ml-auto">{{ item.hint }}</span>
+            </RouterLink>
+          </nav>
+
+          <div class="px-8 pb-10 flex items-center justify-between">
+            <ThemeToggle />
+            <button
+              type="button"
+              class="state-layer press inline-flex items-center gap-2 rounded-full px-4 py-2.5 type-label-lg text-error focus-ring"
+              :disabled="authBusy"
+              @click="logout"
+            >
+              <LogOut :size="15" />
+              退出登录
+            </button>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <Toast :show="toastVisible" :message="toast" variant="error" @dismiss="dismissToast" />
   </div>
-  <Toast :show="toastVisible" :message="toast" variant="error" @dismiss="dismissToast" />
 </template>

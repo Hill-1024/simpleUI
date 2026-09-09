@@ -30,17 +30,17 @@ const padMap = {
 const variantClass = computed(() => {
   switch (props.variant) {
     case "elevated":
-      return "glass-elevated specular-edge";
+      return "glass-elevated";
     case "soft":
-      return "glass-soft specular-edge";
+      return "glass-soft";
     case "rail":
-      return "glass-rail specular-edge";
+      return "glass-rail";
     case "flat":
-      return "bg-surfaceContainerLow border border-outlineVariant/40";
+      return "bg-[rgb(var(--md-surface-container-high)/0.4)] border border-[rgb(var(--md-outline-variant)/0.5)] dark:border-white/6";
     case "ghost":
       return "bg-transparent";
     default:
-      return "glass-panel specular-edge";
+      return "glass-panel";
   }
 });
 </script>
@@ -49,11 +49,11 @@ const variantClass = computed(() => {
   <component
     :is="tag"
     :class="[
-      'relative isolate transition-all duration-300 ease-standard',
+      'relative isolate transition-all duration-350 ease-out-soft',
       variantClass,
       radiusMap[radius] || radiusMap.lg,
       padMap[padding] || padMap.md,
-      interactive ? 'hover:-translate-y-px hover:shadow-glass-strong cursor-pointer' : ''
+      interactive ? 'press hover:shadow-elev-3 cursor-pointer' : ''
     ]"
   >
     <slot />

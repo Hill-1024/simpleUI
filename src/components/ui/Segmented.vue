@@ -17,7 +17,7 @@ function activate(option) {
 <template>
   <div
     :class="[
-      'glass-soft specular-edge inline-flex rounded-full p-1 gap-1',
+      'inline-flex rounded-full p-1 gap-0.5 bg-[rgb(var(--md-surface-container-high)/0.55)] border border-[rgb(var(--md-outline-variant)/0.5)] dark:border-white/6',
       fullWidth ? 'w-full' : ''
     ]"
     role="tablist"
@@ -29,11 +29,11 @@ function activate(option) {
       role="tab"
       :aria-selected="modelValue === opt.value"
       :class="[
-        'state-layer relative inline-flex items-center justify-center gap-1.5 rounded-full transition-all duration-200 ease-standard focus-ring',
-        size === 'sm' ? 'min-h-8 px-3 py-1 type-label-md' : 'min-h-10 px-4 py-1.5 type-label-lg',
+        'state-layer press relative inline-flex items-center justify-center gap-1.5 rounded-full transition-all duration-250 ease-out-soft focus-ring',
+        size === 'sm' ? 'min-h-7.5 px-3 py-1 type-label-md' : 'min-h-9 px-4 py-1.5 type-label-lg',
         fullWidth ? 'flex-1' : '',
         modelValue === opt.value
-          ? 'bg-secondaryContainer text-onSecondaryContainer shadow-elev-1'
+          ? 'bg-[rgb(var(--md-surface-container-lowest))] text-onSurface shadow-elev-1 dark:bg-[rgb(var(--md-surface-container-highest))]'
           : 'text-onSurfaceVariant hover:text-onSurface'
       ]"
       :disabled="opt.disabled"

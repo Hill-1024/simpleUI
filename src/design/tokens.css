@@ -1,157 +1,174 @@
-/* SimpleUI Design Tokens · Material 3 × Liquid Glass
- * Light/Dark theme color, elevation, motion variables.
+/* SimpleUI Design Tokens · "Porcelain / Deepfield"
+ * Light = airy porcelain surfaces with soft ambient depth.
+ * Dark  = near-black deepfield with emerald mesh orbs and hairline glass.
  * Colors stored as raw "R G B" triplets so UnoCSS can apply alpha-value. */
 
 :root,
 [data-theme="light"] {
   color-scheme: light;
 
-  /* ─── Primary (teal) ─── */
-  --md-primary: 0 107 95;
+  /* ─── Primary (jade) ─── */
+  --md-primary: 13 118 96;
   --md-on-primary: 255 255 255;
-  --md-primary-container: 159 242 226;
-  --md-on-primary-container: 0 32 28;
+  --md-primary-container: 196 242 226;
+  --md-on-primary-container: 4 48 38;
 
-  /* ─── Secondary (sage) ─── */
-  --md-secondary: 74 99 95;
+  /* ─── Secondary (sage slate) ─── */
+  --md-secondary: 74 95 88;
   --md-on-secondary: 255 255 255;
-  --md-secondary-container: 205 232 226;
-  --md-on-secondary-container: 6 32 28;
+  --md-secondary-container: 219 231 226;
+  --md-on-secondary-container: 15 32 27;
 
-  /* ─── Tertiary (cool slate) ─── */
-  --md-tertiary: 67 98 119;
+  /* ─── Tertiary (steel blue) ─── */
+  --md-tertiary: 58 94 122;
   --md-on-tertiary: 255 255 255;
-  --md-tertiary-container: 202 230 255;
-  --md-on-tertiary-container: 0 30 46;
+  --md-tertiary-container: 214 232 244;
+  --md-on-tertiary-container: 10 34 50;
 
   /* ─── Error ─── */
-  --md-error: 186 26 26;
+  --md-error: 191 43 29;
   --md-on-error: 255 255 255;
-  --md-error-container: 255 218 214;
-  --md-on-error-container: 65 0 2;
+  --md-error-container: 255 218 212;
+  --md-on-error-container: 65 2 0;
 
   /* ─── Warning ─── */
-  --md-warning: 138 90 0;
+  --md-warning: 148 94 4;
   --md-on-warning: 255 255 255;
-  --md-warning-container: 255 222 170;
-  --md-on-warning-container: 44 23 0;
+  --md-warning-container: 255 221 168;
+  --md-on-warning-container: 42 24 0;
 
   /* ─── Success ─── */
-  --md-success: 30 119 53;
+  --md-success: 28 122 60;
   --md-on-success: 255 255 255;
-  --md-success-container: 191 234 192;
-  --md-on-success-container: 0 33 5;
+  --md-success-container: 196 240 200;
+  --md-on-success-container: 0 34 10;
 
   /* ─── Surfaces ─── */
-  --md-surface: 244 251 248;
-  --md-surface-dim: 213 219 216;
-  --md-surface-bright: 244 251 248;
+  --md-surface: 242 244 243;
+  --md-surface-dim: 214 218 216;
+  --md-surface-bright: 250 251 250;
   --md-surface-container-lowest: 255 255 255;
-  --md-surface-container-low: 239 245 242;
-  --md-surface-container: 233 239 236;
-  --md-surface-container-high: 227 233 230;
-  --md-surface-container-highest: 222 228 225;
+  --md-surface-container-low: 248 250 249;
+  --md-surface-container: 241 244 242;
+  --md-surface-container-high: 235 238 236;
+  --md-surface-container-highest: 227 232 229;
 
   /* ─── Text & lines ─── */
-  --md-on-surface: 22 29 27;
-  --md-on-surface-variant: 63 73 69;
-  --md-outline: 111 121 118;
-  --md-outline-variant: 190 201 197;
-  --md-scrim: 0 0 0;
-  --md-shadow: 0 0 0;
+  --md-on-surface: 19 26 23;
+  --md-on-surface-variant: 86 97 92;
+  --md-outline: 122 133 128;
+  --md-outline-variant: 213 220 216;
+  --md-scrim: 12 18 16;
+  --md-shadow: 18 26 23;
 
-  /* ─── Glass alphas ─── */
-  --glass-alpha-panel: 0.72;
-  --glass-alpha-elevated: 0.84;
-  --glass-alpha-soft: 0.5;
-  --glass-alpha-rail: 0.66;
-  --glass-alpha-overlay: 0.55;
+  /* ─── Glass alphas (kept for compat; surfaces now read mostly opaque) ─── */
+  --glass-alpha-panel: 0.92;
+  --glass-alpha-elevated: 0.96;
+  --glass-alpha-soft: 0.55;
+  --glass-alpha-rail: 0.88;
+  --glass-alpha-overlay: 0.85;
 
-  /* ─── Backdrop mesh (visible behind glass surfaces) ─── */
+  /* ─── Backdrop mesh: barely-there porcelain wash ─── */
   --backdrop-mesh:
-    radial-gradient(at 18% 12%, rgba(0, 107, 95, 0.22) 0px, transparent 48%),
-    radial-gradient(at 82% 22%, rgba(67, 98, 119, 0.18) 0px, transparent 50%),
-    radial-gradient(at 64% 88%, rgba(138, 90, 0, 0.12) 0px, transparent 55%),
-    radial-gradient(at 8% 76%, rgba(0, 137, 122, 0.18) 0px, transparent 55%);
-  --backdrop-base: rgb(232 244 240);
+    radial-gradient(52rem 40rem at 12% -6%, rgba(13, 118, 96, 0.07) 0px, transparent 60%),
+    radial-gradient(46rem 36rem at 92% 4%, rgba(58, 94, 122, 0.06) 0px, transparent 58%),
+    radial-gradient(50rem 44rem at 68% 100%, rgba(148, 94, 4, 0.035) 0px, transparent 62%);
+  --backdrop-base: rgb(242 244 243);
 
-  /* ─── Elevations ─── */
-  --md-shadow-elev-1: 0 1px 2px rgba(15, 23, 42, 0.05), 0 1px 3px rgba(15, 23, 42, 0.04);
-  --md-shadow-elev-2: 0 2px 6px rgba(15, 23, 42, 0.06), 0 4px 10px rgba(15, 23, 42, 0.05);
-  --md-shadow-elev-3: 0 6px 16px rgba(15, 23, 42, 0.08), 0 2px 6px rgba(15, 23, 42, 0.05);
-  --md-shadow-elev-4: 0 12px 28px rgba(15, 23, 42, 0.1), 0 4px 10px rgba(15, 23, 42, 0.05);
-  --md-shadow-elev-5: 0 24px 56px rgba(15, 23, 42, 0.14), 0 8px 18px rgba(15, 23, 42, 0.06);
-  --md-shadow-glass: 0 12px 36px rgba(15, 23, 42, 0.08), 0 2px 6px rgba(15, 23, 42, 0.04);
-  --md-shadow-glass-strong: 0 28px 72px rgba(15, 23, 42, 0.14), 0 4px 12px rgba(15, 23, 42, 0.06);
+  /* ─── Elevations: wide, diffused, low-opacity ambient shadows ─── */
+  --md-shadow-elev-1: 0 1px 2px rgba(18, 26, 23, 0.04), 0 1px 3px rgba(18, 26, 23, 0.03);
+  --md-shadow-elev-2: 0 2px 4px rgba(18, 26, 23, 0.035), 0 6px 16px rgba(18, 26, 23, 0.05);
+  --md-shadow-elev-3: 0 4px 10px rgba(18, 26, 23, 0.045), 0 12px 28px rgba(18, 26, 23, 0.06);
+  --md-shadow-elev-4: 0 8px 20px rgba(18, 26, 23, 0.055), 0 24px 52px rgba(18, 26, 23, 0.08);
+  --md-shadow-elev-5: 0 16px 36px rgba(18, 26, 23, 0.07), 0 40px 88px rgba(18, 26, 23, 0.1);
+  --md-shadow-glass: var(--md-shadow-elev-2);
+  --md-shadow-glass-strong: var(--md-shadow-elev-4);
+
+  /* ─── Hairlines ─── */
+  --hairline: rgba(18, 26, 23, 0.07);
+  --hairline-strong: rgba(18, 26, 23, 0.11);
+  --inset-highlight: rgba(255, 255, 255, 0.65);
+
+  /* ─── Motion ─── */
+  --ease-signature: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.28, 0.48, 1);
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --md-primary: 110 219 198;
-  --md-on-primary: 0 55 49;
-  --md-primary-container: 0 80 72;
-  --md-on-primary-container: 159 242 226;
+  --md-primary: 74 214 176;
+  --md-on-primary: 0 54 41;
+  --md-primary-container: 8 84 66;
+  --md-on-primary-container: 178 244 222;
 
-  --md-secondary: 177 204 198;
-  --md-on-secondary: 28 53 49;
-  --md-secondary-container: 51 75 71;
-  --md-on-secondary-container: 205 232 226;
+  --md-secondary: 174 199 191;
+  --md-on-secondary: 22 42 36;
+  --md-secondary-container: 50 68 62;
+  --md-on-secondary-container: 214 231 225;
 
-  --md-tertiary: 171 202 226;
-  --md-on-tertiary: 18 51 70;
-  --md-tertiary-container: 43 73 94;
-  --md-on-tertiary-container: 202 230 255;
+  --md-tertiary: 162 199 226;
+  --md-on-tertiary: 12 38 54;
+  --md-tertiary-container: 40 68 88;
+  --md-on-tertiary-container: 208 230 246;
 
-  --md-error: 255 180 171;
-  --md-on-error: 105 0 5;
-  --md-error-container: 147 0 10;
-  --md-on-error-container: 255 218 214;
+  --md-error: 255 177 165;
+  --md-on-error: 87 13 5;
+  --md-error-container: 142 32 20;
+  --md-on-error-container: 255 218 212;
 
-  --md-warning: 255 185 96;
-  --md-on-warning: 70 44 0;
-  --md-warning-container: 105 66 0;
-  --md-on-warning-container: 255 222 170;
+  --md-warning: 255 183 92;
+  --md-on-warning: 66 39 0;
+  --md-warning-container: 102 62 0;
+  --md-on-warning-container: 255 221 168;
 
-  --md-success: 165 214 167;
-  --md-on-success: 0 57 12;
-  --md-success-container: 27 94 32;
-  --md-on-success-container: 191 234 192;
+  --md-success: 148 216 162;
+  --md-on-success: 0 52 18;
+  --md-success-container: 20 92 42;
+  --md-on-success-container: 196 240 200;
 
-  --md-surface: 14 21 19;
-  --md-surface-dim: 14 21 19;
-  --md-surface-bright: 52 58 56;
-  --md-surface-container-lowest: 9 15 14;
-  --md-surface-container-low: 22 29 27;
-  --md-surface-container: 26 33 31;
-  --md-surface-container-high: 37 43 41;
-  --md-surface-container-highest: 48 54 52;
+  --md-surface: 8 12 11;
+  --md-surface-dim: 8 12 11;
+  --md-surface-bright: 50 57 54;
+  --md-surface-container-lowest: 13 18 16;
+  --md-surface-container-low: 17 23 21;
+  --md-surface-container: 21 28 26;
+  --md-surface-container-high: 30 38 35;
+  --md-surface-container-highest: 39 48 45;
 
-  --md-on-surface: 222 228 225;
-  --md-on-surface-variant: 190 201 197;
-  --md-outline: 136 147 144;
-  --md-outline-variant: 63 73 69;
+  --md-on-surface: 226 232 229;
+  --md-on-surface-variant: 154 167 161;
+  --md-outline: 106 118 113;
+  --md-outline-variant: 45 56 52;
   --md-scrim: 0 0 0;
   --md-shadow: 0 0 0;
 
-  --glass-alpha-panel: 0.55;
-  --glass-alpha-elevated: 0.7;
-  --glass-alpha-soft: 0.4;
-  --glass-alpha-rail: 0.5;
-  --glass-alpha-overlay: 0.6;
+  --glass-alpha-panel: 0.78;
+  --glass-alpha-elevated: 0.86;
+  --glass-alpha-soft: 0.45;
+  --glass-alpha-rail: 0.74;
+  --glass-alpha-overlay: 0.9;
 
   --backdrop-mesh:
-    radial-gradient(at 18% 12%, rgba(0, 137, 122, 0.32) 0px, transparent 48%),
-    radial-gradient(at 82% 22%, rgba(67, 98, 119, 0.28) 0px, transparent 50%),
-    radial-gradient(at 64% 88%, rgba(184, 119, 0, 0.18) 0px, transparent 55%),
-    radial-gradient(at 8% 76%, rgba(0, 175, 154, 0.22) 0px, transparent 55%);
-  --backdrop-base: rgb(8 14 12);
+    radial-gradient(56rem 44rem at 14% -8%, rgba(24, 160, 122, 0.16) 0px, transparent 58%),
+    radial-gradient(48rem 40rem at 96% 8%, rgba(84, 116, 158, 0.12) 0px, transparent 56%),
+    radial-gradient(52rem 46rem at 60% 108%, rgba(140, 108, 32, 0.08) 0px, transparent 60%);
+  --backdrop-base: rgb(8 12 11);
 
-  --md-shadow-elev-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.32);
-  --md-shadow-elev-2: 0 2px 6px rgba(0, 0, 0, 0.4), 0 4px 10px rgba(0, 0, 0, 0.32);
-  --md-shadow-elev-3: 0 6px 16px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.32);
-  --md-shadow-elev-4: 0 12px 28px rgba(0, 0, 0, 0.5), 0 4px 10px rgba(0, 0, 0, 0.34);
-  --md-shadow-elev-5: 0 24px 56px rgba(0, 0, 0, 0.6), 0 8px 18px rgba(0, 0, 0, 0.4);
-  --md-shadow-glass: 0 12px 36px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.35);
-  --md-shadow-glass-strong: 0 28px 72px rgba(0, 0, 0, 0.6), 0 4px 12px rgba(0, 0, 0, 0.4);
+  --md-shadow-elev-1: 0 1px 2px rgba(0, 0, 0, 0.32), 0 1px 3px rgba(0, 0, 0, 0.24);
+  --md-shadow-elev-2: 0 2px 4px rgba(0, 0, 0, 0.32), 0 6px 16px rgba(0, 0, 0, 0.32);
+  --md-shadow-elev-3: 0 4px 10px rgba(0, 0, 0, 0.36), 0 12px 28px rgba(0, 0, 0, 0.38);
+  --md-shadow-elev-4: 0 8px 20px rgba(0, 0, 0, 0.4), 0 24px 52px rgba(0, 0, 0, 0.44);
+  --md-shadow-elev-5: 0 16px 36px rgba(0, 0, 0, 0.44), 0 40px 88px rgba(0, 0, 0, 0.52);
+  --md-shadow-glass: var(--md-shadow-elev-2);
+  --md-shadow-glass-strong: var(--md-shadow-elev-4);
+
+  --hairline: rgba(255, 255, 255, 0.075);
+  --hairline-strong: rgba(255, 255, 255, 0.12);
+  --inset-highlight: rgba(255, 255, 255, 0.08);
+
+  --ease-signature: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.28, 0.48, 1);
 }

@@ -52,44 +52,47 @@ watch(
         aria-modal="true"
       >
         <div
-          class="absolute inset-0 bg-scrim/50 backdrop-blur-sm motion-fade-in"
+          class="absolute inset-0 bg-[rgb(var(--md-scrim)/0.45)] backdrop-blur-md motion-fade-in"
           @click="closeOnBackdrop && close()"
         />
+        <!-- Double-bezel dialog: outer shell + inner core -->
         <div
           :class="[
-            'relative w-full glass-elevated specular-edge rounded-2xl shadow-glass-strong motion-scale-in flex flex-col max-h-[calc(100vh-4rem)]',
+            'relative w-full rounded-[2rem] p-1.5 bg-[rgb(var(--md-surface-container-high)/0.6)] border border-[rgb(var(--md-outline-variant)/0.7)] dark:border-white/8 shadow-elev-5 motion-scale-in',
             widthMap[size] || widthMap.md
           ]"
         >
-          <header
-            v-if="$slots.header || title || showClose"
-            class="flex items-start justify-between gap-3 px-6 pt-5 pb-4 border-b border-outlineVariant/40"
-          >
-            <div class="min-w-0 flex-1">
-              <slot name="header">
-                <h2 v-if="title" class="type-title-lg text-onSurface break-words">{{ title }}</h2>
-                <p v-if="subtitle" class="type-body-sm text-onSurfaceVariant mt-0.5">{{ subtitle }}</p>
-              </slot>
-            </div>
-            <button
-              v-if="showClose"
-              type="button"
-              class="state-layer rounded-full h-9 w-9 inline-flex items-center justify-center text-onSurfaceVariant hover:text-onSurface focus-ring shrink-0"
-              aria-label="关闭"
-              @click="close"
+          <div class="rounded-[1.6rem] bg-[rgb(var(--md-surface-container-lowest))] dark:bg-[rgb(var(--md-surface-container-low))] border border-[rgb(var(--md-outline-variant)/0.4)] dark:border-white/5 flex flex-col max-h-[calc(100dvh-4rem)] overflow-hidden">
+            <header
+              v-if="$slots.header || title || showClose"
+              class="flex items-start justify-between gap-3 px-6 pt-5 pb-4 border-b border-[rgb(var(--md-outline-variant)/0.45)] dark:border-white/5"
             >
-              <X :size="18" />
-            </button>
-          </header>
-          <div :class="['px-6 py-5 flex-1', scrollable ? 'overflow-auto' : '']">
-            <slot />
+              <div class="min-w-0 flex-1">
+                <slot name="header">
+                  <h2 v-if="title" class="type-title-lg text-onSurface break-words">{{ title }}</h2>
+                  <p v-if="subtitle" class="type-body-sm text-onSurfaceVariant mt-0.5">{{ subtitle }}</p>
+                </slot>
+              </div>
+              <button
+                v-if="showClose"
+                type="button"
+                class="state-layer press rounded-full h-9 w-9 inline-flex items-center justify-center text-onSurfaceVariant hover:text-onSurface focus-ring shrink-0"
+                aria-label="关闭"
+                @click="close"
+              >
+                <X :size="17" />
+              </button>
+            </header>
+            <div :class="['px-6 py-5 flex-1', scrollable ? 'overflow-auto' : '']">
+              <slot />
+            </div>
+            <footer
+              v-if="$slots.footer"
+              class="px-6 py-4 border-t border-[rgb(var(--md-outline-variant)/0.45)] dark:border-white/5 flex flex-wrap items-center justify-end gap-2"
+            >
+              <slot name="footer" />
+            </footer>
           </div>
-          <footer
-            v-if="$slots.footer"
-            class="px-6 py-4 border-t border-outlineVariant/40 flex flex-wrap items-center justify-end gap-2"
-          >
-            <slot name="footer" />
-          </footer>
         </div>
       </div>
     </Transition>
@@ -99,7 +102,7 @@ watch(
 <style scoped>
 .md-modal-enter-active,
 .md-modal-leave-active {
-  transition: opacity 0.24s cubic-bezier(0.2, 0, 0, 1);
+  transition: opacity 0.26s var(--ease-signature);
 }
 .md-modal-enter-from,
 .md-modal-leave-to {

@@ -11,13 +11,13 @@ const props = defineProps({
 
 const sizeMap = {
   xs: "min-h-5 px-1.5 py-0.5 type-label-sm gap-1",
-  sm: "min-h-6 px-2 py-0.5 type-label-sm gap-1",
+  sm: "min-h-6 px-2 py-0.5 type-label-sm gap-1.5",
   md: "min-h-7 px-2.5 py-1 type-label-md gap-1.5",
-  lg: "min-h-8 px-3 py-1 type-label-lg gap-1.5"
+  lg: "min-h-8 px-3 py-1 type-label-lg gap-2"
 };
 
 const tonalMap = {
-  neutral: "bg-surfaceContainerHigh text-onSurfaceVariant",
+  neutral: "bg-[rgb(var(--md-surface-container-high))] text-onSurfaceVariant",
   primary: "bg-primaryContainer text-onPrimaryContainer",
   secondary: "bg-secondaryContainer text-onSecondaryContainer",
   tertiary: "bg-tertiaryContainer text-onTertiaryContainer",
@@ -27,7 +27,7 @@ const tonalMap = {
 };
 
 const outlinedMap = {
-  neutral: "border border-outlineVariant text-onSurfaceVariant",
+  neutral: "border border-[rgb(var(--md-outline-variant))] text-onSurfaceVariant",
   primary: "border border-primary/50 text-primary",
   secondary: "border border-secondary/50 text-secondary",
   tertiary: "border border-tertiary/50 text-tertiary",
@@ -37,7 +37,7 @@ const outlinedMap = {
 };
 
 const filledMap = {
-  neutral: "bg-surfaceContainerHighest text-onSurface",
+  neutral: "bg-[rgb(var(--md-surface-container-highest))] text-onSurface",
   primary: "bg-primary text-onPrimary",
   secondary: "bg-secondary text-onSecondary",
   tertiary: "bg-tertiary text-onTertiary",
@@ -64,7 +64,7 @@ const cls = computed(() => {
         ? filledMap[props.color] || filledMap.neutral
         : tonalMap[props.color] || tonalMap.neutral;
   return [
-    "inline-flex max-w-full items-center font-medium leading-snug transition-colors duration-200 ease-standard",
+    "inline-flex max-w-full items-center font-medium leading-snug",
     sizeMap[props.size] || sizeMap.md,
     surface,
     props.pill ? "rounded-full" : "rounded-sm"

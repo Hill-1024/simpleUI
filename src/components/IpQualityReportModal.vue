@@ -20,11 +20,11 @@ function close() {
     title="IPQuality 检测报告"
     @close="close"
   >
-    <div v-if="ipQualityModal?.reports" class="grid gap-3">
+    <div v-if="ipQualityModal?.reports" class="grid gap-4">
       <article
         v-for="report in ipQualityModal.reports"
         :key="`${report.mode}-${report.reportPath || report.reportUrl}`"
-        class="rounded-2xl bg-surfaceContainerLow/60 border border-outlineVariant/30 p-4"
+        class="rounded-xl bg-[rgb(var(--md-surface-container-high)/0.4)] border border-[rgb(var(--md-outline-variant)/0.5)] dark:border-white/6 p-4"
       >
         <header class="flex items-center justify-between gap-2 mb-3">
           <h3 class="type-title-md text-onSurface">
@@ -42,16 +42,15 @@ function close() {
           <span>{{ report.reportUrl }}</span>
           <ExternalLink :size="13" />
         </a>
-        <pre
-          v-else
-          class="max-h-[40vh] overflow-auto bg-surfaceContainerLowest/80 rounded-xl px-3 py-2 mt-2 font-mono type-body-sm text-onSurface whitespace-pre-wrap"
-        >{{ report.rawOutput || "暂无检测报告。" }}</pre>
+        <div v-else class="mt-2 rounded-[0.9rem] p-1 bg-[rgb(var(--md-surface-container-high)/0.5)] border border-[rgb(var(--md-outline-variant)/0.5)] dark:border-white/8">
+          <pre class="console-surface max-h-[40vh] overflow-auto rounded-[0.7rem] px-3.5 py-2.5 font-mono type-body-sm whitespace-pre-wrap">{{ report.rawOutput || "暂无检测报告。" }}</pre>
+        </div>
       </article>
     </div>
     <template v-else-if="ipQualityModal">
       <div
         v-if="ipQualityModal.reportUrl"
-        class="rounded-xl bg-surfaceContainerLow/60 border border-outlineVariant/30 px-3 py-2 mb-3 flex items-center justify-between gap-2"
+        class="rounded-xl bg-[rgb(var(--md-surface-container-high)/0.4)] border border-[rgb(var(--md-outline-variant)/0.5)] dark:border-white/6 px-3.5 py-2.5 mb-4 flex items-center justify-between gap-2"
       >
         <span class="type-label-md text-onSurfaceVariant">在线报告</span>
         <a
@@ -66,14 +65,13 @@ function close() {
       </div>
       <iframe
         v-if="ipQualityModal.reportUrl"
-        class="w-full h-[60vh] rounded-2xl border border-outlineVariant/30 bg-white"
+        class="w-full h-[60vh] rounded-xl border border-[rgb(var(--md-outline-variant)/0.5)] dark:border-white/8 bg-white"
         :src="ipQualityModal.reportUrl"
         title="IPQuality Report"
       />
-      <pre
-        v-else
-        class="max-h-[60vh] overflow-auto bg-surfaceContainerLowest/80 rounded-2xl px-4 py-3 font-mono type-body-sm text-onSurface whitespace-pre-wrap"
-      >{{ ipQualityModal.rawOutput || "暂无检测报告。" }}</pre>
+      <div v-else class="rounded-[1.2rem] p-1 bg-[rgb(var(--md-surface-container-high)/0.5)] border border-[rgb(var(--md-outline-variant)/0.5)] dark:border-white/8">
+        <pre class="console-surface max-h-[60vh] overflow-auto rounded-[0.9rem] px-4 py-3 font-mono type-body-sm whitespace-pre-wrap">{{ ipQualityModal.rawOutput || "暂无检测报告。" }}</pre>
+      </div>
     </template>
   </Modal>
 </template>

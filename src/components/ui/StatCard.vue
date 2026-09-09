@@ -12,35 +12,48 @@ const props = defineProps({
   accent: { type: String, default: "primary" }
 });
 
-const accentMap = {
-  primary: "from-primary/15 to-primary/0 text-primary",
-  secondary: "from-secondary/15 to-secondary/0 text-secondary",
-  tertiary: "from-tertiary/15 to-tertiary/0 text-tertiary",
-  success: "from-success/15 to-success/0 text-success",
-  warning: "from-warning/15 to-warning/0 text-warning",
-  error: "from-error/15 to-error/0 text-error"
+const accentTextMap = {
+  primary: "text-primary",
+  secondary: "text-secondary",
+  tertiary: "text-tertiary",
+  success: "text-success",
+  warning: "text-warning",
+  error: "text-error"
 };
 
-const accentClass = computed(() => accentMap[props.accent] || accentMap.primary);
+const accentGlowMap = {
+  primary: "bg-primary/12",
+  secondary: "bg-secondary/12",
+  tertiary: "bg-tertiary/12",
+  success: "bg-success/12",
+  warning: "bg-warning/12",
+  error: "bg-error/12"
+};
+
+const accentText = computed(() => accentTextMap[props.accent] || accentTextMap.primary);
+const accentGlow = computed(() => accentGlowMap[props.accent] || accentGlowMap.primary);
 </script>
 
 <template>
   <article
-    class="glass-panel specular-edge rounded-2xl p-5 flex flex-col gap-3 relative overflow-hidden transition-all duration-300 ease-standard hover:-translate-y-0.5 hover:shadow-glass-strong"
+    class="glass-panel rounded-2xl p-5 flex flex-col gap-3 relative overflow-hidden transition-all duration-350 ease-out-soft hover:-translate-y-0.5 hover:shadow-elev-3"
   >
-    <div :class="['absolute inset-0 bg-gradient-to-br opacity-60 pointer-events-none', accentClass]" />
+    <div
+      :class="['absolute -top-10 -right-10 h-28 w-28 rounded-full blur-2xl pointer-events-none', accentGlow]"
+      aria-hidden="true"
+    />
     <div class="relative flex items-start justify-between gap-3">
-      <p class="type-label-lg text-onSurfaceVariant">{{ label }}</p>
+      <p class="type-eyebrow text-onSurfaceVariant/85 pt-1">{{ label }}</p>
       <span
         v-if="icon"
-        :class="['grid place-items-center h-9 w-9 rounded-full bg-surfaceContainerHighest specular-edge', accentClass.split(' ').pop()]"
+        :class="['grid place-items-center h-9 w-9 rounded-xl bg-[rgb(var(--md-surface-container-high)/0.6)] border border-[rgb(var(--md-outline-variant)/0.5)] dark:border-white/6', accentText]"
       >
         <component :is="icon" :size="16" />
       </span>
     </div>
     <div class="relative flex items-baseline gap-1.5">
-      <span class="type-headline-md text-onSurface tabular-nums break-words">{{ value }}</span>
-      <span v-if="unit" class="type-title-md text-onSurfaceVariant">{{ unit }}</span>
+      <span class="text-[30px] leading-[38px] font-semibold tracking-[-0.02em] text-onSurface tabular-nums break-words">{{ value }}</span>
+      <span v-if="unit" class="type-title-sm text-onSurfaceVariant">{{ unit }}</span>
     </div>
     <div v-if="trend || hint" class="relative flex items-center gap-1.5 type-body-sm">
       <span
@@ -52,7 +65,7 @@ const accentClass = computed(() => accentMap[props.accent] || accentMap.primary)
       >{{ trend }}</span>
       <span v-if="hint" class="text-onSurfaceVariant">{{ hint }}</span>
     </div>
-    <div v-if="$slots.default" class="relative mt-1">
+    <div v-if="$slots.default" class="relative mt-0.5">
       <slot />
     </div>
   </article>

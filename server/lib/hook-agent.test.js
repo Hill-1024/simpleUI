@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildHookUpgradeBundleB64,
   buildInstallAgentScript,
+  callHookAgent,
   hookFingerprintMatches,
   isLegacyHookActionAllowed,
   isLegacyHookTransport,
@@ -23,6 +24,17 @@ test("legacy HTTP hooks may only use upgrade transport actions", () => {
   assert.equal(isLegacyHookActionAllowed("upgrade-agent"), true);
   assert.equal(isLegacyHookActionAllowed("deploy"), false);
   assert.equal(isLegacyHookActionAllowed("exec"), false);
+});
+
+test("hook agent requests reject non-HTTP(S) schemes", async () => {
+  await assert.rejects(
+    callHookAgent({ server: { hookUrl: "file:///etc/simpleui-hook", hookToken: "token" }, action: "upgrade-agent" }),
+    /Unsupported hook URL protocol/
+  );
+  await assert.rejects(
+    callHookAgent({ server: { hookUrl: "ftp://203.0.113.10:37877", hookToken: "token" }, action: "upgrade-agent" }),
+    /Unsupported hook URL protocol/
+  );
 });
 
 test("TLS handshake failures are recognized as protocol setup failures", () => {

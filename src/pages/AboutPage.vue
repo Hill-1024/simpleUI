@@ -24,10 +24,14 @@ const {
 </script>
 
 <template>
-  <div class="flex flex-col gap-5">
-    <Surface variant="elevated" radius="2xl" padding="lg" class="flex items-center gap-5 flex-wrap">
-      <div class="grid place-items-center h-16 w-16 rounded-3xl bg-primary text-onPrimary type-headline-md specular-edge">
-        S
+  <div class="flex flex-col gap-6">
+    <!-- Brand hero -->
+    <Surface v-reveal variant="elevated" radius="2xl" padding="lg" class="flex items-center gap-6 flex-wrap">
+      <div class="relative">
+        <div class="absolute inset-0 rounded-[1.5rem] bg-primary/30 blur-xl" aria-hidden="true" />
+        <div class="relative grid place-items-center h-16 w-16 rounded-[1.5rem] bg-gradient-to-b from-primary to-[rgb(var(--md-on-primary-container))] text-onPrimary type-headline-md font-bold specular-ring shadow-elev-2">
+          S
+        </div>
       </div>
       <div class="min-w-0 flex-1">
         <h2 class="type-headline-sm text-onSurface">{{ projectInfo.name }}</h2>
@@ -35,27 +39,29 @@ const {
           管理多台服务器上的 Hysteria2 / Trojan 节点。
         </p>
       </div>
-      <Chip variant="tonal" color="primary" size="md">v{{ projectInfo.version }}</Chip>
+      <Chip variant="tonal" color="primary" size="md" class="font-mono">v{{ projectInfo.version }}</Chip>
     </Surface>
 
     <div class="grid gap-5 grid-cols-1 lg:grid-cols-3">
-      <Surface variant="panel" radius="2xl" padding="lg" class="flex flex-col gap-4">
-        <header class="flex items-center gap-2">
-          <Info :size="18" class="text-primary" />
+      <Surface v-reveal="70" variant="panel" radius="2xl" padding="lg" class="flex flex-col gap-5">
+        <header class="flex items-center gap-2.5">
+          <span class="grid place-items-center h-8 w-8 rounded-[10px] bg-primary/10 text-primary">
+            <Info :size="15" />
+          </span>
           <h3 class="type-title-md text-onSurface">项目信息</h3>
         </header>
-        <dl class="grid gap-3">
-          <div class="flex justify-between items-baseline gap-2 border-b border-outlineVariant/30 pb-2">
+        <dl class="grid gap-3.5">
+          <div class="flex justify-between items-baseline gap-2 border-b border-[rgb(var(--md-outline-variant)/0.4)] dark:border-white/5 pb-3">
             <dt class="type-label-md text-onSurfaceVariant">作者</dt>
             <dd class="type-body-md text-onSurface">{{ projectInfo.author }}</dd>
           </div>
-          <div class="flex justify-between items-baseline gap-2 border-b border-outlineVariant/30 pb-2">
+          <div class="flex justify-between items-baseline gap-2 border-b border-[rgb(var(--md-outline-variant)/0.4)] dark:border-white/5 pb-3">
             <dt class="type-label-md text-onSurfaceVariant">当前版本</dt>
-            <dd class="type-body-md text-onSurface font-mono">{{ projectInfo.version }}</dd>
+            <dd class="type-body-md text-onSurface font-mono tabular-nums">{{ projectInfo.version }}</dd>
           </div>
-          <div class="flex justify-between items-baseline gap-2 border-b border-outlineVariant/30 pb-2">
+          <div class="flex justify-between items-baseline gap-2 border-b border-[rgb(var(--md-outline-variant)/0.4)] dark:border-white/5 pb-3">
             <dt class="type-label-md text-onSurfaceVariant">发布日期</dt>
-            <dd class="type-body-md text-onSurface">{{ projectInfo.releaseDate }}</dd>
+            <dd class="type-body-md text-onSurface tabular-nums">{{ projectInfo.releaseDate }}</dd>
           </div>
           <div class="flex justify-between items-baseline gap-2">
             <dt class="type-label-md text-onSurfaceVariant shrink-0">项目主页</dt>
@@ -74,16 +80,18 @@ const {
         </dl>
       </Surface>
 
-      <Surface variant="panel" radius="2xl" padding="lg" class="flex flex-col gap-4">
-        <header class="flex items-center gap-2">
-          <PackageCheck :size="18" class="text-primary" />
+      <Surface v-reveal="140" variant="panel" radius="2xl" padding="lg" class="flex flex-col gap-5">
+        <header class="flex items-center gap-2.5">
+          <span class="grid place-items-center h-8 w-8 rounded-[10px] bg-primary/10 text-primary">
+            <PackageCheck :size="15" />
+          </span>
           <h3 class="type-title-md text-onSurface">支持平台</h3>
         </header>
         <div class="grid gap-2.5">
           <article
             v-for="target in releaseTargets"
             :key="`${target.platform}-${target.arch}`"
-            class="rounded-xl bg-surfaceContainerLow/60 border border-outlineVariant/30 px-3 py-2.5 flex items-center justify-between gap-2"
+            class="rounded-xl bg-[rgb(var(--md-surface-container-high)/0.4)] border border-[rgb(var(--md-outline-variant)/0.5)] dark:border-white/6 px-3.5 py-3 flex items-center justify-between gap-2"
           >
             <div class="min-w-0">
               <p class="type-title-sm text-onSurface">{{ target.platform }}</p>
@@ -94,12 +102,14 @@ const {
         </div>
       </Surface>
 
-      <Surface variant="panel" radius="2xl" padding="lg" class="flex flex-col gap-4">
-        <header class="flex items-center gap-2">
-          <ShieldCheck :size="18" class="text-primary" />
+      <Surface v-reveal="210" variant="panel" radius="2xl" padding="lg" class="flex flex-col gap-5">
+        <header class="flex items-center gap-2.5">
+          <span class="grid place-items-center h-8 w-8 rounded-[10px] bg-primary/10 text-primary">
+            <ShieldCheck :size="15" />
+          </span>
           <h3 class="type-title-md text-onSurface">访问安全</h3>
         </header>
-        <form class="flex flex-col gap-3" @submit.prevent="changeWebPassword">
+        <form class="flex flex-col gap-4" @submit.prevent="changeWebPassword">
           <TextField
             v-model="passwordForm.currentPassword"
             label="当前密码"

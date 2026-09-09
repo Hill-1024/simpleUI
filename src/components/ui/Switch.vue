@@ -21,29 +21,30 @@ function toggle() {
   <button
     type="button"
     :class="[
-      'inline-flex items-center gap-3 select-none focus-ring rounded-full transition',
+      'inline-flex items-center gap-2.5 select-none focus-ring rounded-full transition',
       disabled ? 'opacity-50 pointer-events-none' : ''
     ]"
-    :aria-pressed="on"
+    role="switch"
+    :aria-checked="on"
     :aria-disabled="disabled"
     @click="toggle"
   >
     <span
       :class="[
-        'relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors duration-300 ease-standard border',
+        'relative inline-flex h-6 w-10.5 shrink-0 items-center rounded-full transition-colors duration-300 ease-signature border',
         on
-          ? 'bg-primary border-primary'
-          : 'bg-surfaceContainerHigh border-outline'
+          ? 'bg-primary border-primary specular-ring'
+          : 'bg-[rgb(var(--md-surface-container-highest))] border-[rgb(var(--md-outline-variant))]'
       ]"
     >
       <span
         :class="[
-          'inline-block rounded-full bg-onPrimary shadow-elev-2 transition-all duration-300 ease-emphasized',
-          on ? 'h-5 w-5 translate-x-6' : 'h-4 w-4 translate-x-1 bg-outline'
+          'inline-block rounded-full shadow-elev-1 transition-all duration-300 ease-signature',
+          on ? 'h-4.5 w-4.5 translate-x-[22px] bg-onPrimary' : 'h-3.5 w-3.5 translate-x-[5px] bg-[rgb(var(--md-outline))]'
         ]"
       />
     </span>
-    <span v-if="label" class="type-body-md text-onSurface">{{ label }}</span>
+    <span v-if="label" class="type-label-lg text-onSurface">{{ label }}</span>
     <slot />
   </button>
 </template>

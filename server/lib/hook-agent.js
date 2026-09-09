@@ -573,6 +573,10 @@ export async function callHookAgent({ server, action, env, payload, timeoutMs = 
     if (payload !== undefined) body.payload = payload;
     const runUrl = `${server.hookUrl.replace(/\/$/, "")}/run`;
     const parsed = new URL(runUrl);
+    // Hook endpoints may only speak HTTP(S); reject file:, data:, and other schemes early.
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error(`Unsupported hook URL protocol: ${parsed.protocol}`);
+    }
     let response;
     if (parsed.protocol === "https:") {
       response = await requestJsonWithPinnedTls({

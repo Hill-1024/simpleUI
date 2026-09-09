@@ -51,9 +51,9 @@ const fillColor = computed(() => {
         {{ hint || `${pct.toFixed(0)}%` }}
       </span>
     </div>
-    <div :class="['relative w-full overflow-hidden rounded-full bg-surfaceContainerHighest', heightMap[size] || heightMap.md]">
+    <div :class="['relative w-full overflow-hidden rounded-full bg-[rgb(var(--md-surface-container-highest)/0.8)] dark:bg-white/8', heightMap[size] || heightMap.md]">
       <div
-        :class="['absolute inset-y-0 left-0 rounded-full transition-all duration-500 ease-emphasized', fillColor]"
+        :class="['absolute inset-y-0 left-0 rounded-full transition-[width] duration-700 ease-signature', fillColor]"
         :style="{ width: `${pct}%` }"
       />
     </div>

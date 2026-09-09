@@ -5,30 +5,36 @@ import { useTheme } from "../../composables/useTheme.js";
 
 const { preference, theme, setPreference } = useTheme();
 
-const order = ["auto", "light", "dark"];
-const labelMap = { auto: "跟随系统", light: "浅色", dark: "深色" };
-const iconMap = { auto: MonitorCog, light: Sun, dark: Moon };
-
-const currentIcon = computed(() => {
-  if (preference.value === "auto") return MonitorCog;
-  return iconMap[theme.value] || Sun;
-});
-
-function cycle() {
-  const idx = order.indexOf(preference.value);
-  const next = order[(idx + 1) % order.length];
-  setPreference(next);
-}
+const options = [
+  { value: "auto", label: "跟随系统", icon: MonitorCog },
+  { value: "light", label: "浅色", icon: Sun },
+  { value: "dark", label: "深色", icon: Moon }
+];
 </script>
 
 <template>
-  <button
-    type="button"
-    class="state-layer relative h-9 w-9 inline-flex items-center justify-center rounded-full text-onSurfaceVariant hover:text-onSurface focus-ring"
-    :aria-label="`主题:${labelMap[preference]}`"
-    :title="`主题:${labelMap[preference]}`"
-    @click="cycle"
+  <div
+    class="inline-flex items-center gap-0.5 rounded-full p-1 bg-[rgb(var(--md-surface-container-high)/0.6)] border border-[rgb(var(--md-outline-variant)/0.5)] dark:border-white/6"
+    role="radiogroup"
+    aria-label="主题"
   >
-    <component :is="currentIcon" :size="17" />
-  </button>
+    <button
+      v-for="opt in options"
+      :key="opt.value"
+      type="button"
+      role="radio"
+      :aria-checked="preference === opt.value"
+      :title="opt.label"
+      :aria-label="opt.label"
+      class="press relative h-7 w-7 grid place-items-center rounded-full transition-colors duration-250 ease-out-soft focus-ring"
+      :class="
+        preference === opt.value
+          ? 'bg-[rgb(var(--md-surface-container-lowest))] text-onSurface shadow-elev-1 dark:bg-[rgb(var(--md-surface-container-highest))]'
+          : 'text-onSurfaceVariant hover:text-onSurface'
+      "
+      @click="setPreference(opt.value)"
+    >
+      <component :is="opt.icon" :size="14" />
+    </button>
+  </div>
 </template>

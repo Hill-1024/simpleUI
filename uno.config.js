@@ -53,15 +53,15 @@ export default defineConfig({
       shadow: "rgb(var(--md-shadow) / <alpha-value>)"
     },
     fontFamily: {
-      sans: 'Inter, "PingFang SC", "HarmonyOS Sans SC", "Source Han Sans SC", "Noto Sans CJK SC", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
-      mono: '"JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace'
+      sans: '"Plus Jakarta Sans Variable", "PingFang SC", "HarmonyOS Sans SC", "Source Han Sans SC", "Noto Sans CJK SC", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
+      mono: '"JetBrains Mono Variable", ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace'
     },
     borderRadius: {
-      xs: "4px",
-      sm: "8px",
-      md: "12px",
-      lg: "16px",
-      xl: "20px",
+      xs: "6px",
+      sm: "10px",
+      md: "14px",
+      lg: "18px",
+      xl: "22px",
       "2xl": "28px",
       "3xl": "36px",
       full: "9999px"
@@ -76,46 +76,52 @@ export default defineConfig({
       "glass-strong": "var(--md-shadow-glass-strong)"
     },
     transitionTimingFunction: {
-      standard: "cubic-bezier(0.2, 0, 0, 1)",
-      emphasized: "cubic-bezier(0.3, 0, 0, 1)",
-      "emphasized-decel": "cubic-bezier(0.05, 0.7, 0.1, 1)",
-      "emphasized-accel": "cubic-bezier(0.3, 0, 0.8, 0.15)"
+      signature: "cubic-bezier(0.32, 0.72, 0, 1)",
+      "out-soft": "cubic-bezier(0.22, 1, 0.36, 1)",
+      spring: "cubic-bezier(0.34, 1.28, 0.48, 1)",
+      standard: "cubic-bezier(0.32, 0.72, 0, 1)",
+      emphasized: "cubic-bezier(0.32, 0.72, 0, 1)",
+      "emphasized-decel": "cubic-bezier(0.22, 1, 0.36, 1)",
+      "emphasized-accel": "cubic-bezier(0.4, 0, 1, 0.6)"
     }
   },
   shortcuts: {
+    /* Surfaces: solid, calm, hairline-separated. No blur on scrolling content. */
     "glass-base":
-      "relative isolate backdrop-blur-xl backdrop-saturate-150 border border-white/10 dark:border-white/8",
+      "relative isolate border border-[rgb(var(--md-outline-variant)/0.65)] dark:border-white/8",
     "glass-panel":
-      "glass-base bg-[rgb(var(--md-surface-container)/var(--glass-alpha-panel))] shadow-glass",
+      "glass-base bg-[rgb(var(--md-surface-container-lowest)/var(--glass-alpha-panel))] dark:bg-[rgb(var(--md-surface-container)/var(--glass-alpha-panel))] shadow-elev-2",
     "glass-elevated":
-      "glass-base bg-[rgb(var(--md-surface-container-high)/var(--glass-alpha-elevated))] shadow-glass-strong",
+      "glass-base bg-[rgb(var(--md-surface-container-lowest)/var(--glass-alpha-elevated))] dark:bg-[rgb(var(--md-surface-container-low)/var(--glass-alpha-elevated))] shadow-elev-4",
     "glass-soft":
-      "glass-base bg-[rgb(var(--md-surface-container-low)/var(--glass-alpha-soft))]",
+      "glass-base bg-[rgb(var(--md-surface-container-high)/var(--glass-alpha-soft))] shadow-none",
     "glass-rail":
-      "glass-base bg-[rgb(var(--md-surface-container-low)/var(--glass-alpha-rail))] shadow-glass",
+      "glass-base bg-[rgb(var(--md-surface-container-lowest)/var(--glass-alpha-rail))] dark:bg-[rgb(var(--md-surface-container-low)/var(--glass-alpha-rail))] shadow-elev-3",
+    /* Machined inner highlight for primary actions and brand marks. */
     "specular-top":
-      "before:content-[''] before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-white/40 before:to-transparent before:pointer-events-none dark:before:via-white/20",
+      "before:content-[''] before:absolute before:inset-x-3 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-white/50 before:to-transparent before:pointer-events-none dark:before:via-white/25",
     "specular-ring":
-      "after:content-[''] after:absolute after:inset-0 after:rounded-[inherit] after:pointer-events-none after:[box-shadow:inset_0_1px_0_rgb(255_255_255/0.35),inset_0_-1px_0_rgb(0_0_0/0.05)] dark:after:[box-shadow:inset_0_1px_0_rgb(255_255_255/0.12),inset_0_-1px_0_rgb(0_0_0/0.2)]",
+      "after:content-[''] after:absolute after:inset-0 after:rounded-[inherit] after:pointer-events-none after:[box-shadow:inset_0_1px_0_rgb(255_255_255/0.4),inset_0_-1px_0_rgb(0_0_0/0.06)] dark:after:[box-shadow:inset_0_1px_0_rgb(255_255_255/0.1),inset_0_-1px_0_rgb(0_0_0/0.24)]",
     "focus-ring":
       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[rgb(var(--md-surface))]",
-    "state-layer":
-      "relative before:content-[''] before:absolute before:inset-0 before:rounded-[inherit] before:opacity-0 before:transition-opacity before:duration-150 before:bg-current hover:before:opacity-8 active:before:opacity-12 before:pointer-events-none",
-    "type-display-lg": "text-[57px] leading-[68px] tracking-normal font-light",
-    "type-display-md": "text-[45px] leading-[56px] tracking-normal font-light",
-    "type-display-sm": "text-[36px] leading-[46px] tracking-normal font-light",
-    "type-headline-lg": "text-[32px] leading-[44px] tracking-normal font-medium",
-    "type-headline-md": "text-[28px] leading-[38px] tracking-normal font-medium",
-    "type-headline-sm": "text-[24px] leading-[34px] tracking-normal font-medium",
-    "type-title-lg": "text-[22px] leading-[30px] tracking-normal font-medium",
-    "type-title-md": "text-[16px] leading-[26px] tracking-normal font-semibold",
-    "type-title-sm": "text-[14px] leading-[22px] tracking-normal font-semibold",
+    /* Physical press feedback. */
+    press: "transition-transform duration-200 ease-[cubic-bezier(0.34,1.28,0.48,1)] active:scale-[0.97]",
+    "type-display-lg": "text-[56px] leading-[64px] tracking-[-0.02em] font-semibold",
+    "type-display-md": "text-[44px] leading-[52px] tracking-[-0.02em] font-semibold",
+    "type-display-sm": "text-[34px] leading-[42px] tracking-[-0.015em] font-semibold",
+    "type-headline-lg": "text-[30px] leading-[40px] tracking-[-0.015em] font-semibold",
+    "type-headline-md": "text-[26px] leading-[36px] tracking-[-0.015em] font-semibold",
+    "type-headline-sm": "text-[22px] leading-[30px] tracking-[-0.01em] font-semibold",
+    "type-title-lg": "text-[20px] leading-[28px] tracking-[-0.01em] font-semibold",
+    "type-title-md": "text-[16px] leading-[24px] tracking-normal font-semibold",
+    "type-title-sm": "text-[14px] leading-[20px] tracking-normal font-semibold",
     "type-body-lg": "text-[16px] leading-[26px] tracking-normal",
     "type-body-md": "text-[14px] leading-[22px] tracking-normal",
-    "type-body-sm": "text-[12px] leading-[18px] tracking-normal",
-    "type-label-lg": "text-[14px] leading-[22px] font-medium tracking-normal",
-    "type-label-md": "text-[12px] leading-[18px] font-medium tracking-normal",
-    "type-label-sm": "text-[11px] leading-[16px] font-medium tracking-normal"
+    "type-body-sm": "text-[12.5px] leading-[19px] tracking-normal",
+    "type-label-lg": "text-[14px] leading-[20px] font-medium tracking-normal",
+    "type-label-md": "text-[12.5px] leading-[18px] font-medium tracking-normal",
+    "type-label-sm": "text-[11px] leading-[16px] font-medium tracking-[0.01em]",
+    "type-eyebrow": "text-[10.5px] leading-[16px] font-semibold uppercase tracking-[0.18em]"
   },
   safelist: ["animate-spin"],
   content: {

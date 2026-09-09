@@ -29,8 +29,8 @@ function close() {
     title="手动添加监控节点"
     @close="close"
   >
-    <form id="manual-node-form" class="flex flex-col gap-3" @submit.prevent="submitManualNode">
-      <div class="grid gap-3 grid-cols-1 sm:grid-cols-2">
+    <form id="manual-node-form" class="flex flex-col gap-4" @submit.prevent="submitManualNode">
+      <div class="grid gap-3.5 grid-cols-1 sm:grid-cols-2">
         <Select v-model="manualNodeForm.serverId" label="目标服务器" required>
           <option value="" disabled>选择服务器</option>
           <option v-for="server in readyServers" :key="server.id" :value="server.id">
